@@ -1,0 +1,1198 @@
+\documentclass[../main.tex]{subfiles}
+\begin{document}
+
+Chương này trình bày cách xây dựng hệ thống E-Commerce hoàn chỉnh dựa trên các kết quả phân tích ở Chương 2 và thiết kế AI Service ở Chương 3. Nội dung chương tập trung vào kiến trúc triển khai tổng thể, API Gateway, xác thực bằng JWT, giao tiếp giữa các service, Docker hóa hệ thống, luồng mua hàng end-to-end, định hướng triển khai Kubernetes, logging, monitoring và đánh giá hệ thống. Mục tiêu của chương không chỉ là mô tả các thành phần kỹ thuật rời rạc mà còn chỉ ra cách các thành phần phối hợp với nhau để tạo thành một hệ thống microservices có thể vận hành, mở rộng và bảo trì.
+
+\section{Kiến trúc tổng thể}
+\label{section:4.1}
+
+\subsection{Mô hình hệ thống}
+\label{subsection:4.1.1}
+
+Hệ thống E-Commerce được triển khai theo kiến trúc microservices. Client không gọi trực tiếp từng service mà gửi request đến API Gateway. API Gateway định tuyến request đến service phù hợp như Product Service, User Service, Cart Service, Order Service, Payment Service, Shipping Service hoặc AI Service. Mỗi service chịu trách nhiệm cho một miền nghiệp vụ riêng và sở hữu database riêng của mình.
+
+Mô hình này giúp hệ thống tách biệt rõ ràng giữa các bounded context. Product Service quản lý catalog sản phẩm, User Service quản lý định danh và phân quyền, Cart Service quản lý giỏ hàng, Order Service điều phối quá trình đặt hàng, Payment Service xử lý thanh toán, Shipping Service quản lý vận chuyển, còn AI Service hỗ trợ gợi ý và tư vấn sản phẩm. Các service không truy cập trực tiếp database của nhau mà trao đổi thông qua API.
+
+\begin{table}[H]
+    \centering
+    \caption{Các thành phần chính của hệ thống hoàn chỉnh}
+    \label{tab:chapter4-system-components}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.24\textwidth}|p{0.42\textwidth}|p{0.24\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Thành phần} & \textbf{Vai trò} & \textbf{Công nghệ gợi ý} \\
+        \hline
+        Client/Web UI & Giao diện để Guest, Customer và Admin tương tác với hệ thống. & React, Vue hoặc template HTML \\
+        \hline
+        API Gateway & Điểm vào duy nhất, định tuyến request đến các service nội bộ. & Nginx \\
+        \hline
+        Product Service & Quản lý sản phẩm, danh mục, hình ảnh, giá và tồn kho. & Django REST Framework \\
+        \hline
+        User Service & Quản lý tài khoản, hồ sơ, vai trò, quyền và xác thực JWT. & Django REST Framework \\
+        \hline
+        Cart Service & Quản lý giỏ hàng tạm thời của Customer. & Django REST Framework \\
+        \hline
+        Order Service & Quản lý đơn hàng, trạng thái đơn hàng và snapshot sản phẩm. & Django REST Framework \\
+        \hline
+        Payment Service & Xử lý thanh toán COD hoặc thanh toán giả lập. & Django REST Framework \\
+        \hline
+        Shipping Service & Tạo vận đơn, tính phí giao hàng và cập nhật trạng thái vận chuyển. & Django REST Framework \\
+        \hline
+        AI Service & Gợi ý sản phẩm và hỗ trợ chatbot tư vấn sản phẩm. & Python, FastAPI hoặc Django \\
+        \hline
+        Databases & Lưu trữ dữ liệu riêng cho từng service. & PostgreSQL hoặc MySQL \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \resizebox{0.98\textwidth}{!}{%
+    \begin{tikzpicture}[
+        component/.style={draw=primary, rounded corners, fill=primary!10, text width=2.6cm, minimum height=0.9cm, align=center, font=\small},
+        database/.style={draw=primary, rounded corners, fill=primary!5, text width=2.2cm, minimum height=0.85cm, align=center, font=\scriptsize},
+        line/.style={->, thick, color=primary, shorten >=2pt, shorten <=2pt},
+        bus/.style={thick, color=primary},
+        dashedline/.style={->, thick, dashed, color=primary, shorten >=2pt, shorten <=2pt}
+    ]
+        \node[component] (client) at (0, 6.4) {Client / Web UI};
+        \node[component] (gateway) at (0, 4.9) {API Gateway\\Nginx};
+
+        \node[component] (product) at (-8.0, 2.4) {Product Service};
+        \node[component] (user) at (-4.8, 2.4) {User Service};
+        \node[component] (cart) at (-1.6, 2.4) {Cart Service};
+        \node[component] (order) at (1.6, 2.4) {Order Service};
+        \node[component] (payment) at (4.8, 2.4) {Payment Service};
+        \node[component] (shipping) at (8.0, 2.4) {Shipping Service};
+        \node[component] (ai) at (0, -0.7) {AI Service};
+
+        \node[database] (productDb) at (-8.0, 0.3) {product\_db};
+        \node[database] (userDb) at (-4.8, 0.3) {user\_db};
+        \node[database] (cartDb) at (-1.6, 0.3) {cart\_db};
+        \node[database] (orderDb) at (1.6, 0.3) {order\_db};
+        \node[database] (paymentDb) at (4.8, 0.3) {payment\_db};
+        \node[database] (shippingDb) at (8.0, 0.3) {shipping\_db};
+        \node[database] (aiDb) at (0, -2.6) {ai/vector\_db};
+
+        \coordinate (gatewayBus) at (0, 3.7);
+        \coordinate (busLeft) at (-8.0, 3.7);
+        \coordinate (busRight) at (8.0, 3.7);
+
+        \draw[line] (client) -- (gateway);
+        \draw[line] (gateway) -- (gatewayBus);
+        \draw[bus] (busLeft) -- (busRight);
+        \draw[line] (product|-gatewayBus) -- (product);
+        \draw[line] (user|-gatewayBus) -- (user);
+        \draw[line] (cart|-gatewayBus) -- (cart);
+        \draw[line] (order|-gatewayBus) -- (order);
+        \draw[line] (payment|-gatewayBus) -- (payment);
+        \draw[line] (shipping|-gatewayBus) -- (shipping);
+        \draw[line] (gateway.south) -- ++(0,-0.65) -| (ai.north);
+
+        \draw[line] (product) -- (productDb);
+        \draw[line] (user) -- (userDb);
+        \draw[line] (cart) -- (cartDb);
+        \draw[line] (order) -- (orderDb);
+        \draw[line] (payment) -- (paymentDb);
+        \draw[line] (shipping) -- (shippingDb);
+        \draw[line] (ai) -- (aiDb);
+
+        \draw[dashedline] (cart.south west) |- ++(-1.2,-0.8) -| (product.south east);
+        \draw[dashedline] (order.north west) -- (cart.north east);
+        \draw[dashedline] (order.south west) |- ++(-0.7,-0.9) -| (product.south east);
+        \draw[dashedline] (order.north east) -- (payment.north west);
+        \draw[dashedline] (order.south east) |- ++(0.7,-0.9) -| (shipping.south west);
+        \draw[dashedline] (ai.west) -| (-6.6,-0.7) |- (productDb.east);
+    \end{tikzpicture}%
+    }
+    \caption{Mô hình kiến trúc tổng thể của hệ thống E-Commerce microservices}
+    \label{fig:chapter4-overall-architecture}
+\end{figure}
+
+\subsection{Nguyên tắc}
+\label{subsection:4.1.2}
+
+Khi triển khai hệ thống microservices, điều quan trọng là tránh biến hệ thống thành một distributed monolith. Vì vậy, mỗi service cần có trách nhiệm rõ ràng, dữ liệu riêng, API rõ ràng và khả năng triển khai độc lập. API Gateway chỉ đóng vai trò định tuyến, không chứa business logic của các service.
+
+\begin{table}[H]
+    \centering
+    \caption{Nguyên tắc triển khai hệ thống}
+    \label{tab:chapter4-principles}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.28\textwidth}|p{0.62\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Nguyên tắc} & \textbf{Cách áp dụng trong hệ thống} \\
+        \hline
+        Database per service & Mỗi service sở hữu database riêng và không cho service khác truy cập trực tiếp. \\
+        \hline
+        Loose coupling & Các service giao tiếp qua REST API hoặc event, không phụ thuộc trực tiếp vào code của nhau. \\
+        \hline
+        High cohesion & Mỗi service tập trung vào một nhóm nghiệp vụ có liên quan chặt chẽ. \\
+        \hline
+        Independent deployment & Mỗi service có Dockerfile và có thể deploy lại mà không cần build toàn bộ hệ thống. \\
+        \hline
+        Stateless service & Service không lưu session trong bộ nhớ cục bộ, giúp dễ scale nhiều instance. \\
+        \hline
+        Externalized configuration & Database URL, secret key và service URL được cấu hình bằng biến môi trường. \\
+        \hline
+        Observability & Mỗi service cần có log, health check và thông tin phục vụ giám sát. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\section{System Architecture}
+\label{section:4.2}
+
+\subsection{Overview}
+\label{subsection:4.2.1}
+
+Ở mức triển khai, hệ thống hoạt động theo luồng tổng quát: người dùng gửi request từ client đến API Gateway, Gateway định tuyến request đến service phù hợp, service xử lý nghiệp vụ và truy cập database riêng, sau đó response được trả về client thông qua Gateway. Nếu một nghiệp vụ cần phối hợp nhiều service, service điều phối sẽ gọi API nội bộ của các service liên quan.
+
+Các API của hệ thống có thể được chia thành nhiều nhóm. Public API phục vụ Guest, Customer API phục vụ người dùng đã đăng nhập, Admin API phục vụ quản trị viên, Internal API phục vụ giao tiếp giữa service, còn AI API phục vụ các chức năng gợi ý và tư vấn sản phẩm.
+
+\begin{table}[H]
+    \centering
+    \caption{Phân loại API trong hệ thống}
+    \label{tab:chapter4-api-types}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.18\textwidth}|p{0.22\textwidth}|p{0.28\textwidth}|p{0.22\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Nhóm API} & \textbf{Người gọi} & \textbf{Ví dụ} & \textbf{Yêu cầu bảo mật} \\
+        \hline
+        Public API & Guest & /api/products & Không cần token \\
+        \hline
+        Customer API & Customer & /api/cart, /api/orders & JWT Customer \\
+        \hline
+        Admin API & Admin & /api/admin/products & JWT Admin \\
+        \hline
+        Internal API & Service khác & /internal/products/\{id\} & Chỉ truy cập trong network nội bộ \\
+        \hline
+        AI API & Customer hoặc service & /api/ai/recommendations & JWT hoặc service token \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Microservice Architecture}
+\label{subsection:4.2.2}
+
+Mỗi microservice trong hệ thống là một đơn vị triển khai độc lập, có source code, database, cấu hình và API riêng. Việc phân rã service dựa trên bounded context đã xác định ở Chương 2. Điều này giúp mô hình dữ liệu trong mỗi service nhất quán với nghiệp vụ mà service đó phụ trách.
+
+\begin{table}[H]
+    \centering
+    \caption{Mapping bounded context sang microservice}
+    \label{tab:chapter4-service-mapping}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.2\textwidth}|p{0.22\textwidth}|p{0.2\textwidth}|p{0.28\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Service} & \textbf{Bounded Context} & \textbf{Database} & \textbf{Trách nhiệm chính} \\
+        \hline
+        Product Service & Product Context & product\_db & Quản lý sản phẩm, danh mục, hình ảnh và tồn kho. \\
+        \hline
+        User Service & Identity Context & user\_db & Quản lý người dùng, vai trò, quyền và xác thực. \\
+        \hline
+        Cart Service & Cart Context & cart\_db & Quản lý giỏ hàng và cart item. \\
+        \hline
+        Order Service & Order Context & order\_db & Quản lý đơn hàng, trạng thái và snapshot sản phẩm. \\
+        \hline
+        Payment Service & Payment Context & payment\_db & Quản lý giao dịch và kết quả thanh toán. \\
+        \hline
+        Shipping Service & Shipping Context & shipping\_db & Quản lý vận đơn và trạng thái giao hàng. \\
+        \hline
+        AI Service & Recommendation Context & ai\_db/vector\_db & Gợi ý sản phẩm và chatbot tư vấn. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+Một điểm quan trọng là cùng một khái niệm có thể được biểu diễn khác nhau trong từng service. Ví dụ, Product trong Product Service là entity đầy đủ gồm mô tả, hình ảnh, giá và tồn kho; nhưng Product trong Order Service chỉ là snapshot tại thời điểm đặt hàng. Thiết kế này giúp đơn hàng không bị thay đổi lịch sử khi thông tin sản phẩm trong catalog được cập nhật sau đó.
+
+\subsection{API Gateway}
+\label{subsection:4.2.3}
+
+API Gateway là thành phần đứng giữa client và các service nội bộ. Trong hệ thống này, Gateway được triển khai bằng Nginx. Client chỉ cần biết địa chỉ Gateway, trong khi địa chỉ của các service được ẩn trong network nội bộ. Gateway nhận request, kiểm tra path và chuyển tiếp request đến service tương ứng.
+
+\begin{table}[H]
+    \centering
+    \caption{Route chính tại API Gateway}
+    \label{tab:chapter4-gateway-routes}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.28\textwidth}|p{0.26\textwidth}|p{0.34\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Đường dẫn ngoài} & \textbf{Service đích} & \textbf{Mục đích} \\
+        \hline
+        /api/products/ & Product Service & Xem, tìm kiếm và quản lý sản phẩm. \\
+        \hline
+        /api/auth/ & User Service & Đăng ký, đăng nhập và cấp JWT. \\
+        \hline
+        /api/users/ & User Service & Quản lý hồ sơ và địa chỉ người dùng. \\
+        \hline
+        /api/cart/ & Cart Service & Thêm, sửa và xóa sản phẩm trong giỏ hàng. \\
+        \hline
+        /api/orders/ & Order Service & Tạo và theo dõi đơn hàng. \\
+        \hline
+        /api/payments/ & Payment Service & Xử lý thanh toán. \\
+        \hline
+        /api/shipping/ & Shipping Service & Quản lý vận chuyển. \\
+        \hline
+        /api/ai/ & AI Service & Gợi ý và tư vấn sản phẩm. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\begin{lstlisting}[caption={Cấu hình route mẫu của API Gateway}, label={lst:chapter4-nginx-routes}]
+location /api/products/ {
+    proxy_pass http://product-service:8000/;
+}
+
+location /api/auth/ {
+    proxy_pass http://user-service:8000/auth/;
+}
+
+location /api/orders/ {
+    proxy_pass http://order-service:8000/orders/;
+}
+
+location /api/ai/ {
+    proxy_pass http://ai-service:8000/;
+}
+\end{lstlisting}
+
+\subsection{Service Communication}
+\label{subsection:4.2.4}
+
+Trong phiên bản triển khai cơ bản, các service giao tiếp với nhau bằng REST API. Cách tiếp cận này dễ hiểu, dễ kiểm thử bằng Postman hoặc cURL, phù hợp với phạm vi đồ án môn học. Đối với các nghiệp vụ bất đồng bộ như gửi email, cập nhật trạng thái vận chuyển hoặc đồng bộ dữ liệu hành vi sang AI Service, hệ thống có thể mở rộng bằng message queue trong các phiên bản sau.
+
+\begin{table}[H]
+    \centering
+    \caption{Giao tiếp giữa các service}
+    \label{tab:chapter4-service-communication}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.18\textwidth}|p{0.18\textwidth}|p{0.3\textwidth}|p{0.24\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Service nguồn} & \textbf{Service đích} & \textbf{API/Thông điệp} & \textbf{Mục đích} \\
+        \hline
+        Cart Service & Product Service & GET /internal/products/\{id\} & Kiểm tra sản phẩm trước khi thêm vào giỏ. \\
+        \hline
+        Order Service & Cart Service & GET /internal/carts/current & Lấy dữ liệu giỏ hàng khi tạo đơn. \\
+        \hline
+        Order Service & Product Service & POST /internal/inventory/reserve & Giữ hoặc giảm tồn kho. \\
+        \hline
+        Order Service & Payment Service & POST /payments & Tạo giao dịch thanh toán. \\
+        \hline
+        Order Service & Shipping Service & POST /shipments & Tạo vận đơn sau khi đơn hàng hợp lệ. \\
+        \hline
+        AI Service & Product Service & GET /products & Lấy metadata sản phẩm để gợi ý. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\begin{lstlisting}[caption={Luồng giao tiếp khi tạo đơn hàng}, label={lst:chapter4-order-communication}]
+1. Customer gui yeu cau tao don hang tu gio hang.
+2. API Gateway chuyen request den Order Service.
+3. Order Service lay thong tin gio hang tu Cart Service.
+4. Order Service kiem tra san pham va ton kho qua Product Service.
+5. Order Service tao Order voi product snapshot.
+6. Order Service yeu cau Payment Service tao giao dich.
+7. Neu thanh toan hop le, Order Service yeu cau Shipping Service tao van don.
+8. He thong tra ve trang thai don hang cho Customer.
+\end{lstlisting}
+
+\subsection{Containerization and Deployment}
+\label{subsection:4.2.5}
+
+Để hệ thống có thể chạy nhất quán trên nhiều môi trường, mỗi service được đóng gói thành một Docker image riêng. Docker Compose được sử dụng để chạy toàn bộ hệ thống trong môi trường local hoặc demo. Trong cấu hình này, API Gateway là thành phần duy nhất expose port ra bên ngoài, còn các service và database chỉ giao tiếp trong Docker network nội bộ.
+
+\begin{table}[H]
+    \centering
+    \caption{Danh sách container trong hệ thống}
+    \label{tab:chapter4-containers}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.28\textwidth}|p{0.18\textwidth}|p{0.18\textwidth}|p{0.26\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Container} & \textbf{Port nội bộ} & \textbf{Port public} & \textbf{Vai trò} \\
+        \hline
+        api-gateway & 80 & 8080 & Entrypoint của hệ thống. \\
+        \hline
+        product-service & 8000 & - & Quản lý catalog. \\
+        \hline
+        user-service & 8000 & - & Xác thực và người dùng. \\
+        \hline
+        cart-service & 8000 & - & Giỏ hàng. \\
+        \hline
+        order-service & 8000 & - & Đơn hàng. \\
+        \hline
+        payment-service & 8000 & - & Thanh toán. \\
+        \hline
+        shipping-service & 8000 & - & Vận chuyển. \\
+        \hline
+        ai-service & 8000 & - & Gợi ý và tư vấn sản phẩm. \\
+        \hline
+        product-db, user-db, order-db & 5432 & - & Database riêng cho service. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{System Structure}
+\label{subsection:4.2.6}
+
+Cấu trúc thư mục của hệ thống cần phản ánh đúng kiến trúc microservices. Mỗi service nằm trong một thư mục riêng, có Dockerfile, dependency và cấu hình riêng. Gateway, deployment script và tài liệu hệ thống được tách thành các thư mục riêng để dễ bảo trì.
+
+\begin{lstlisting}[caption={Cấu trúc thư mục hệ thống}, label={lst:chapter4-system-structure}]
+ecommerce-microservices/
+|-- api-gateway/
+|   |-- nginx.conf
+|   |-- Dockerfile
+|-- services/
+|   |-- product-service/
+|   |-- user-service/
+|   |-- cart-service/
+|   |-- order-service/
+|   |-- payment-service/
+|   |-- shipping-service/
+|   |-- ai-service/
+|-- deployment/
+|   |-- docker-compose.yml
+|   |-- .env.example
+|-- docs/
+|   |-- api/
+|   |-- diagrams/
+\end{lstlisting}
+
+\subsection{Design Principles}
+\label{subsection:4.2.7}
+
+Các quyết định thiết kế trong hệ thống hướng đến khả năng mở rộng, dễ bảo trì và cô lập lỗi. Service không nên phụ thuộc trực tiếp vào database hoặc mã nguồn của service khác. Tất cả tương tác liên service cần đi qua API contract rõ ràng.
+
+\begin{table}[H]
+    \centering
+    \caption{Design principles trong quá trình hiện thực}
+    \label{tab:chapter4-design-principles}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.3\textwidth}|p{0.58\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Nguyên tắc} & \textbf{Áp dụng} \\
+        \hline
+        Single Responsibility & Mỗi service chỉ phụ trách một nhóm nghiệp vụ chính. \\
+        \hline
+        API-first & Service công bố API contract rõ ràng trước khi tích hợp. \\
+        \hline
+        Database isolation & Không join dữ liệu trực tiếp giữa nhiều database. \\
+        \hline
+        Idempotency & Các API tạo đơn hàng và thanh toán cần hạn chế xử lý trùng request. \\
+        \hline
+        Failure isolation & Lỗi Payment Service không làm sập Product Service hoặc User Service. \\
+        \hline
+        Observability & Request cần có log để truy vết qua nhiều service. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Security Considerations}
+\label{subsection:4.2.8}
+
+Bảo mật là yêu cầu quan trọng vì hệ thống xử lý thông tin người dùng, đơn hàng và thanh toán. User Service chịu trách nhiệm xác thực và sinh JWT. Các service khác kiểm tra token trước khi xử lý API cần đăng nhập. Endpoint quản trị yêu cầu role Admin, còn endpoint nội bộ chỉ nên truy cập trong network nội bộ.
+
+\begin{table}[H]
+    \centering
+    \caption{Rủi ro bảo mật và giải pháp}
+    \label{tab:chapter4-security-risks}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.32\textwidth}|p{0.56\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Rủi ro} & \textbf{Giải pháp} \\
+        \hline
+        Truy cập API trái phép & Sử dụng JWT và phân quyền RBAC. \\
+        \hline
+        Lộ mật khẩu & Hash password trước khi lưu vào database. \\
+        \hline
+        Gọi internal API từ bên ngoài & Chỉ expose API Gateway, không expose service nội bộ. \\
+        \hline
+        Lộ secret trong source code & Dùng biến môi trường và file .env không commit lên repository. \\
+        \hline
+        Request quá nhiều & Cấu hình rate limit tại API Gateway. \\
+        \hline
+        Dữ liệu đầu vào không hợp lệ & Validate request bằng serializer hoặc schema tại boundary. \\
+        \hline
+        CORS sai cấu hình & Chỉ allow domain client hợp lệ. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Discussion}
+\label{subsection:4.2.9}
+
+Kiến trúc microservices phù hợp với hệ thống E-Commerce vì hệ thống gồm nhiều miền nghiệp vụ có vòng đời dữ liệu khác nhau. Tuy nhiên, microservices cũng làm tăng độ phức tạp vận hành vì cần quản lý nhiều service, nhiều database, network nội bộ, logging phân tán và giao tiếp liên service. Vì vậy, trong phạm vi môn học, Docker Compose và REST API là lựa chọn phù hợp để cân bằng giữa tính thực tế và độ phức tạp.
+
+\begin{table}[H]
+    \centering
+    \caption{So sánh các lựa chọn triển khai}
+    \label{tab:chapter4-architecture-discussion}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.2\textwidth}|p{0.24\textwidth}|p{0.24\textwidth}|p{0.2\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Lựa chọn} & \textbf{Ưu điểm} & \textbf{Nhược điểm} & \textbf{Quyết định} \\
+        \hline
+        REST API & Dễ hiểu, dễ test, dễ tích hợp. & Coupling runtime giữa các service. & Dùng chính. \\
+        \hline
+        Message Queue & Giảm coupling và phù hợp xử lý bất đồng bộ. & Tăng độ phức tạp triển khai. & Hướng mở rộng. \\
+        \hline
+        Docker Compose & Dễ chạy local và demo. & Chưa tối ưu cho production lớn. & Dùng cho triển khai môn học. \\
+        \hline
+        Kubernetes & Scale tốt và phù hợp production. & Cần nhiều cấu hình và kinh nghiệm vận hành. & Optional. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\section{API Gateway (Nginx)}
+\label{section:4.3}
+
+\subsection{Vai trò}
+\label{subsection:4.3.1}
+
+API Gateway là điểm truy cập duy nhất từ bên ngoài vào hệ thống. Thay vì để client biết nhiều địa chỉ service khác nhau, client chỉ cần gọi đến Gateway. Gateway định tuyến request dựa trên path và chuyển request đến service tương ứng trong network nội bộ.
+
+\begin{table}[H]
+    \centering
+    \caption{Vai trò của API Gateway}
+    \label{tab:chapter4-gateway-roles}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.28\textwidth}|p{0.62\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Vai trò} & \textbf{Mô tả} \\
+        \hline
+        Reverse proxy & Chuyển request từ client đến service nội bộ. \\
+        \hline
+        Routing & Map path như /api/products hoặc /api/orders sang service phù hợp. \\
+        \hline
+        Security boundary & Chỉ Gateway expose public port, các service còn lại nằm trong network nội bộ. \\
+        \hline
+        Logging & Ghi log request ở entrypoint của hệ thống. \\
+        \hline
+        CORS & Điều khiển domain client được phép truy cập API. \\
+        \hline
+        Load balancing & Có thể phân phối request đến nhiều instance của cùng service. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Cấu hình mẫu}
+\label{subsection:4.3.2}
+
+Cấu hình Nginx cần khai báo upstream cho từng service và location cho từng nhóm API. Khi proxy request, Gateway cần forward các header quan trọng như Host, X-Real-IP, X-Forwarded-For và Authorization để service phía sau có đủ thông tin xác thực và truy vết.
+
+\begin{lstlisting}[caption={Cấu hình Nginx Gateway mẫu}, label={lst:chapter4-nginx-config}]
+upstream product_service {
+    server product-service:8000;
+}
+
+upstream user_service {
+    server user-service:8000;
+}
+
+upstream order_service {
+    server order-service:8000;
+}
+
+server {
+    listen 80;
+
+    location /api/products/ {
+        proxy_pass http://product_service/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Authorization $http_authorization;
+    }
+
+    location /api/auth/ {
+        proxy_pass http://user_service/auth/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /api/orders/ {
+        proxy_pass http://order_service/orders/;
+        proxy_set_header Host $host;
+        proxy_set_header Authorization $http_authorization;
+    }
+}
+\end{lstlisting}
+
+\section{Authentication (JWT)}
+\label{section:4.4}
+
+\subsection{Cài đặt}
+\label{subsection:4.4.1}
+
+User Service chịu trách nhiệm đăng ký, đăng nhập và sinh JWT. Khi người dùng đăng nhập thành công, hệ thống trả về access token. Client lưu token và gửi token trong header Authorization khi gọi các API cần xác thực. Các service nhận request sẽ kiểm tra token và role trước khi xử lý nghiệp vụ.
+
+\begin{table}[H]
+    \centering
+    \caption{Các claim chính trong JWT}
+    \label{tab:chapter4-jwt-claims}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.24\textwidth}|p{0.64\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Claim} & \textbf{Ý nghĩa} \\
+        \hline
+        sub & Định danh người dùng. \\
+        \hline
+        email & Email dùng để đăng nhập. \\
+        \hline
+        roles & Danh sách vai trò như Customer hoặc Admin. \\
+        \hline
+        exp & Thời điểm token hết hạn. \\
+        \hline
+        iat & Thời điểm token được phát hành. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Cấu hình}
+\label{subsection:4.4.2}
+
+Nếu các service được xây dựng bằng Django REST Framework, có thể sử dụng thư viện djangorestframework-simplejwt để kiểm tra JWT. Các giá trị như JWT secret, thuật toán ký token và thời gian hết hạn token nên được cấu hình bằng biến môi trường.
+
+\begin{lstlisting}[caption={Cấu hình JWT trong Django REST Framework}, label={lst:chapter4-jwt-config}]
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ),
+    "DEFAULT_PERMISSION_CLASSES": (
+        "rest_framework.permissions.IsAuthenticated",
+    ),
+}
+\end{lstlisting}
+
+\begin{table}[H]
+    \centering
+    \caption{Biến môi trường liên quan đến xác thực}
+    \label{tab:chapter4-auth-env}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.34\textwidth}|p{0.54\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Biến môi trường} & \textbf{Ý nghĩa} \\
+        \hline
+        JWT\_SECRET & Khóa bí mật dùng để ký token. \\
+        \hline
+        JWT\_ALGORITHM & Thuật toán ký token, ví dụ HS256. \\
+        \hline
+        ACCESS\_TOKEN\_EXPIRE\_MINUTES & Thời gian sống của access token. \\
+        \hline
+        REFRESH\_TOKEN\_EXPIRE\_DAYS & Thời gian sống của refresh token nếu có. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Luồng}
+\label{subsection:4.4.3}
+
+Luồng xác thực bắt đầu từ User Service. Sau khi có token, client dùng token này để gọi các service khác thông qua Gateway. Gateway không cần xử lý toàn bộ logic xác thực, nhưng phải forward Authorization header đến service phía sau.
+
+\begin{lstlisting}[caption={Luồng đăng nhập và gọi API bằng JWT}, label={lst:chapter4-jwt-flow}]
+1. Customer gui email va password den /api/auth/login.
+2. API Gateway chuyen request den User Service.
+3. User Service kiem tra tai khoan va password_hash.
+4. Neu hop le, User Service sinh JWT access token.
+5. Client luu token va gui Authorization: Bearer <token>.
+6. Service nhan request, kiem tra token va role.
+7. Neu token hop le, service xu ly nghiep vu va tra response.
+\end{lstlisting}
+
+\section{Giao tiếp giữa các Service}
+\label{section:4.5}
+
+\subsection{REST API call}
+\label{subsection:4.5.1}
+
+REST API là cơ chế giao tiếp chính giữa các service trong phiên bản triển khai cơ bản. Trong Docker Compose, mỗi service có thể gọi service khác thông qua tên service, ví dụ http://product-service:8000 hoặc http://payment-service:8000. Các API nội bộ nên được đặt dưới prefix /internal để phân biệt với API public.
+
+\begin{table}[H]
+    \centering
+    \caption{Một số internal endpoint quan trọng}
+    \label{tab:chapter4-internal-endpoints}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.28\textwidth}|p{0.2\textwidth}|p{0.2\textwidth}|p{0.22\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Endpoint nội bộ} & \textbf{Service cung cấp} & \textbf{Service sử dụng} & \textbf{Mục đích} \\
+        \hline
+        /internal/products/\{id\} & Product & Cart, Order & Lấy thông tin sản phẩm. \\
+        \hline
+        /internal/inventory/reserve & Product & Order & Giữ hoặc giảm tồn kho. \\
+        \hline
+        /internal/carts/current & Cart & Order & Lấy giỏ hàng hiện tại. \\
+        \hline
+        /internal/payments & Payment & Order & Tạo giao dịch thanh toán. \\
+        \hline
+        /internal/shipments & Shipping & Order & Tạo vận đơn. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Best Practice}
+\label{subsection:4.5.2}
+
+Giao tiếp giữa các service cần được thiết kế cẩn thận để tránh coupling cao. Service không nên gọi nhau quá nhiều lần trong một request, không nên tạo vòng phụ thuộc, và cần có timeout để tránh một service lỗi làm treo toàn bộ luồng xử lý.
+
+\begin{table}[H]
+    \centering
+    \caption{Best practice khi giao tiếp giữa service}
+    \label{tab:chapter4-service-best-practices}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.32\textwidth}|p{0.56\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Best practice} & \textbf{Lý do} \\
+        \hline
+        Không truy cập database của service khác & Giữ ranh giới ownership dữ liệu. \\
+        \hline
+        Có timeout khi gọi API nội bộ & Tránh request bị treo khi service đích lỗi. \\
+        \hline
+        API contract rõ ràng & Giảm lỗi tích hợp giữa nhiều nhóm phát triển. \\
+        \hline
+        Dùng correlation ID & Dễ truy vết request qua nhiều service. \\
+        \hline
+        Thiết kế API idempotent & Tránh xử lý trùng khi client retry. \\
+        \hline
+        Tránh gọi vòng tròn & Giảm coupling và tránh deadlock nghiệp vụ. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\section{Docker hóa hệ thống}
+\label{section:4.6}
+
+\subsection{Dockerfile (Django)}
+\label{subsection:4.6.1}
+
+Mỗi Django service có Dockerfile riêng. Dockerfile mô tả cách build image, cài dependency, copy source code và chạy service. Trong môi trường demo, có thể dùng runserver; trong môi trường gần production hơn, nên dùng Gunicorn.
+
+\begin{lstlisting}[caption={Dockerfile mẫu cho Django service}, label={lst:chapter4-django-dockerfile}]
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 8000
+
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]
+\end{lstlisting}
+
+\subsection{docker-compose.yml}
+\label{subsection:4.6.2}
+
+Docker Compose được dùng để chạy toàn bộ hệ thống bằng một lệnh. File compose khai báo các service, database, volume, network và quan hệ depends\_on. Trong thiết kế này, API Gateway expose port 8080 ra máy host, còn các service và database chỉ giao tiếp trong Docker network.
+
+\begin{lstlisting}[caption={docker-compose.yml rút gọn cho hệ thống}, label={lst:chapter4-compose-full}]
+services:
+  api-gateway:
+    build: ./api-gateway
+    ports:
+      - "8080:80"
+    depends_on:
+      - product-service
+      - user-service
+      - order-service
+
+  product-service:
+    build: ./services/product-service
+    env_file: .env
+    depends_on:
+      - product-db
+
+  user-service:
+    build: ./services/user-service
+    env_file: .env
+    depends_on:
+      - user-db
+
+  order-service:
+    build: ./services/order-service
+    env_file: .env
+    depends_on:
+      - order-db
+
+  product-db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: product_db
+    volumes:
+      - product_data:/var/lib/postgresql/data
+
+volumes:
+  product_data:
+\end{lstlisting}
+
+\begin{table}[H]
+    \centering
+    \caption{Một số biến môi trường triển khai}
+    \label{tab:chapter4-env-vars}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.34\textwidth}|p{0.54\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Biến môi trường} & \textbf{Ý nghĩa} \\
+        \hline
+        DATABASE\_URL & Chuỗi kết nối database của service. \\
+        \hline
+        JWT\_SECRET & Khóa bí mật dùng để xác thực JWT. \\
+        \hline
+        SERVICE\_NAME & Tên service dùng trong logging. \\
+        \hline
+        PRODUCT\_SERVICE\_URL & URL nội bộ của Product Service. \\
+        \hline
+        PAYMENT\_SERVICE\_URL & URL nội bộ của Payment Service. \\
+        \hline
+        SHIPPING\_SERVICE\_URL & URL nội bộ của Shipping Service. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\section{Luồng hệ thống (End-to-End)}
+\label{section:4.7}
+
+\subsection{Use case: Mua hàng}
+\label{subsection:4.7.1}
+
+Use case mua hàng là luồng quan trọng nhất vì có sự tham gia của nhiều service. Customer xem sản phẩm, thêm sản phẩm vào giỏ, tạo đơn hàng, thanh toán và theo dõi vận chuyển. Trong quá trình đó, Order Service đóng vai trò điều phối chính, nhưng không trực tiếp sở hữu dữ liệu sản phẩm, thanh toán hoặc vận chuyển.
+
+\begin{table}[H]
+    \centering
+    \caption{Các bước trong use case mua hàng}
+    \label{tab:chapter4-purchase-use-case}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.12\textwidth}|p{0.26\textwidth}|p{0.52\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Bước} & \textbf{Actor/Service} & \textbf{Hành động} \\
+        \hline
+        1 & Customer & Xem danh sách và chi tiết sản phẩm. \\
+        \hline
+        2 & Product Service & Trả catalog, giá và trạng thái tồn kho. \\
+        \hline
+        3 & Customer & Thêm sản phẩm vào giỏ hàng. \\
+        \hline
+        4 & Cart Service & Lưu cart item và kiểm tra sản phẩm qua Product Service. \\
+        \hline
+        5 & Customer & Tạo đơn hàng từ giỏ hàng. \\
+        \hline
+        6 & Order Service & Tạo order, lưu snapshot sản phẩm và trạng thái đơn. \\
+        \hline
+        7 & Payment Service & Tạo giao dịch và trả kết quả thanh toán. \\
+        \hline
+        8 & Shipping Service & Tạo vận đơn và mã theo dõi. \\
+        \hline
+        9 & AI Service & Ghi nhận hành vi để phục vụ gợi ý sản phẩm. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \resizebox{0.95\textwidth}{!}{%
+    \begin{tikzpicture}[
+        flowstep/.style={draw=primary, rounded corners, fill=primary!10, text width=3.6cm, minimum height=0.9cm, align=center, font=\scriptsize},
+        line/.style={->, thick, color=primary, shorten >=2pt, shorten <=2pt}
+    ]
+        \node[flowstep] (browse) at (0, 5.0) {Customer xem sản phẩm};
+        \node[flowstep] (product) at (5.2, 5.0) {Product Service trả catalog};
+        \node[flowstep] (cart) at (5.2, 3.2) {Cart Service lưu giỏ hàng};
+        \node[flowstep] (order) at (0, 3.2) {Order Service tạo đơn};
+        \node[flowstep] (payment) at (-5.2, 3.2) {Payment Service tạo giao dịch};
+        \node[flowstep] (shipping) at (-5.2, 1.3) {Shipping Service tạo vận đơn};
+        \node[flowstep] (ai) at (0, 1.3) {AI Service ghi nhận hành vi};
+        \node[flowstep] (result) at (5.2, 1.3) {Customer nhận trạng thái đơn hàng};
+
+        \draw[line] (browse) -- (product);
+        \draw[line] (product) -- (cart);
+        \draw[line] (cart) -- (order);
+        \draw[line] (order) -- (payment);
+        \draw[line] (payment) -- (shipping);
+        \draw[line] (shipping) -- (ai);
+        \draw[line] (ai) -- (result);
+    \end{tikzpicture}%
+    }
+    \caption{Luồng mua hàng end-to-end}
+    \label{fig:chapter4-purchase-flow}
+\end{figure}
+
+\subsection{Sequence logic}
+\label{subsection:4.7.2}
+
+Sequence logic dưới đây mô tả các request chính trong quá trình mua hàng. Nội dung này có thể được dùng làm cơ sở để vẽ sequence diagram UML hoặc kiểm thử tích hợp bằng Postman.
+
+\begin{lstlisting}[caption={Sequence logic của use case mua hàng}, label={lst:chapter4-purchase-sequence}]
+Customer -> Gateway: GET /api/products
+Gateway -> Product Service: GET /products
+Product Service -> product_db: query products
+Product Service -> Gateway: products
+Gateway -> Customer: products
+
+Customer -> Gateway: POST /api/cart/items
+Gateway -> Cart Service: add item
+Cart Service -> Product Service: validate product
+Cart Service -> cart_db: save cart item
+
+Customer -> Gateway: POST /api/orders
+Gateway -> Order Service: create order
+Order Service -> Cart Service: get cart
+Order Service -> Product Service: reserve inventory
+Order Service -> order_db: save order
+Order Service -> Payment Service: create payment
+Order Service -> Shipping Service: create shipment
+Order Service -> Gateway: order status
+Gateway -> Customer: order status
+\end{lstlisting}
+
+\section{Triển khai Kubernetes (Optional)}
+\label{section:4.8}
+
+\subsection{Deployment}
+\label{subsection:4.8.1}
+
+Kubernetes là hướng triển khai phù hợp khi hệ thống cần vận hành ở quy mô lớn hơn Docker Compose. Mỗi service được đóng gói thành image và triển khai bằng Deployment. Kubernetes Service cung cấp DNS nội bộ để các pod giao tiếp với nhau, còn Ingress hoặc API Gateway expose hệ thống ra bên ngoài.
+
+\begin{table}[H]
+    \centering
+    \caption{Thành phần Kubernetes và vai trò}
+    \label{tab:chapter4-k8s-components}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.28\textwidth}|p{0.62\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Thành phần} & \textbf{Vai trò} \\
+        \hline
+        Deployment & Quản lý số lượng pod và quá trình rolling update. \\
+        \hline
+        Service & Cung cấp địa chỉ DNS nội bộ ổn định cho pod. \\
+        \hline
+        Ingress & Định tuyến request từ bên ngoài vào cluster. \\
+        \hline
+        ConfigMap & Lưu cấu hình không nhạy cảm. \\
+        \hline
+        Secret & Lưu cấu hình nhạy cảm như password và token secret. \\
+        \hline
+        Horizontal Pod Autoscaler & Tự động scale số lượng pod theo tải. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Service}
+\label{subsection:4.8.2}
+
+Kubernetes Service giúp các pod truy cập nhau bằng tên service thay vì địa chỉ IP động. Ví dụ, Order Service có thể gọi Product Service thông qua DNS product-service trong cluster.
+
+\begin{lstlisting}[caption={Kubernetes Service mẫu}, label={lst:chapter4-k8s-service}]
+apiVersion: v1
+kind: Service
+metadata:
+  name: product-service
+spec:
+  selector:
+    app: product-service
+  ports:
+    - port: 8000
+      targetPort: 8000
+\end{lstlisting}
+
+\section{Logging và Monitoring}
+\label{section:4.9}
+
+Trong hệ thống microservices, một request có thể đi qua nhiều service trước khi hoàn tất. Vì vậy, logging và monitoring là thành phần bắt buộc để phát hiện lỗi, đo hiệu năng và truy vết request. Mỗi log nên có timestamp, service name, request id, method, path, status code và thời gian xử lý.
+
+\begin{table}[H]
+    \centering
+    \caption{Nội dung cần giám sát trong hệ thống}
+    \label{tab:chapter4-monitoring-metrics}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.3\textwidth}|p{0.58\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Nội dung giám sát} & \textbf{Ý nghĩa} \\
+        \hline
+        Request count & Theo dõi lưu lượng truy cập vào từng service. \\
+        \hline
+        Error rate & Phát hiện tỷ lệ lỗi 4xx và 5xx tăng bất thường. \\
+        \hline
+        Response time & Đánh giá hiệu năng API. \\
+        \hline
+        CPU/RAM & Theo dõi tài nguyên container. \\
+        \hline
+        Database connection & Phát hiện lỗi kết nối hoặc quá tải database. \\
+        \hline
+        Service health & Kiểm tra service còn hoạt động hay không. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\begin{lstlisting}[caption={Log request mẫu}, label={lst:chapter4-log-format}]
+{
+  "timestamp": "2026-04-29T10:15:00Z",
+  "service": "order-service",
+  "request_id": "req-123",
+  "method": "POST",
+  "path": "/orders",
+  "status": 201,
+  "duration_ms": 230
+}
+\end{lstlisting}
+
+Trong môi trường demo, nhóm có thể dùng docker logs để xem log của từng container. Trong môi trường production, có thể triển khai Prometheus và Grafana để thu thập metrics, hoặc ELK/OpenSearch để tập trung log từ nhiều service.
+
+\section{Đánh giá hệ thống}
+\label{section:4.10}
+
+\subsection{Hiệu năng}
+\label{subsection:4.10.1}
+
+Hiệu năng của hệ thống được đánh giá dựa trên các API quan trọng như xem danh sách sản phẩm, thêm sản phẩm vào giỏ hàng, tạo đơn hàng, đăng nhập và lấy danh sách gợi ý. Các API đọc dữ liệu như xem sản phẩm cần phản hồi nhanh, trong khi API tạo đơn hàng có thể chậm hơn vì phải phối hợp nhiều service.
+
+\begin{table}[H]
+    \centering
+    \caption{Tiêu chí hiệu năng mong muốn}
+    \label{tab:chapter4-performance-targets}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.32\textwidth}|p{0.24\textwidth}|p{0.34\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{API} & \textbf{Tiêu chí mong muốn} & \textbf{Ghi chú} \\
+        \hline
+        GET /products & Dưới 500ms & API đọc phổ biến, cần cache hoặc phân trang. \\
+        \hline
+        POST /cart/items & Dưới 700ms & Cần kiểm tra sản phẩm trước khi lưu giỏ. \\
+        \hline
+        POST /orders & Dưới 1500ms & Gọi nhiều service như Cart, Product, Payment, Shipping. \\
+        \hline
+        POST /auth/login & Dưới 800ms & Có bước kiểm tra password hash. \\
+        \hline
+        GET /ai/recommendations & Dưới 2000ms & Có thể cần xử lý model hoặc truy vấn vector. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Khả năng mở rộng}
+\label{subsection:4.10.2}
+
+Ưu điểm lớn của kiến trúc microservices là khả năng scale từng service theo nhu cầu tải. Trong các chiến dịch khuyến mãi, Product Service và Cart Service thường chịu tải lớn hơn. AI Service cũng có thể cần scale riêng vì xử lý gợi ý hoặc chatbot tốn tài nguyên hơn API CRUD thông thường.
+
+\begin{table}[H]
+    \centering
+    \caption{Khả năng mở rộng theo từng service}
+    \label{tab:chapter4-scalability}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.22\textwidth}|p{0.36\textwidth}|p{0.32\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Service} & \textbf{Khi nào cần scale} & \textbf{Cách scale} \\
+        \hline
+        Product Service & Nhiều lượt xem catalog hoặc tìm kiếm. & Tăng instance, cache, read replica. \\
+        \hline
+        Cart Service & Nhiều người dùng thao tác giỏ hàng cùng lúc. & Tăng instance, tối ưu storage. \\
+        \hline
+        Order Service & Nhiều đơn hàng trong thời gian ngắn. & Tăng instance, dùng queue cho tác vụ phụ. \\
+        \hline
+        AI Service & Nhiều request gợi ý hoặc chatbot. & Tăng worker hoặc tách model server. \\
+        \hline
+        API Gateway & Request tổng tăng cao. & Load balancing nhiều instance gateway. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Ưu điểm}
+\label{subsection:4.10.3}
+
+Hệ thống có ranh giới nghiệp vụ rõ ràng, phù hợp với phương pháp Domain Driven Design. Mỗi service nhỏ hơn, dễ hiểu hơn và có thể được phát triển độc lập. Việc tích hợp AI Service cũng thuận lợi vì Recommendation Context được tách riêng, không làm phình to các service nghiệp vụ chính. Ngoài ra, lỗi ở một service có thể được cô lập, tránh làm sập toàn bộ hệ thống.
+
+\subsection{Nhược điểm}
+\label{subsection:4.10.4}
+
+So với monolithic, hệ thống microservices phức tạp hơn trong triển khai và vận hành. Nhóm phát triển phải quản lý nhiều repository hoặc nhiều module, nhiều database, cấu hình network, API contract và logging phân tán. Các luồng nghiệp vụ liên service cũng khó debug hơn vì lỗi có thể xuất hiện tại Gateway, service nguồn, service đích hoặc database.
+
+\begin{table}[H]
+    \centering
+    \caption{Tổng hợp ưu điểm và nhược điểm}
+    \label{tab:chapter4-pros-cons}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.2\textwidth}|p{0.34\textwidth}|p{0.34\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Tiêu chí} & \textbf{Ưu điểm} & \textbf{Nhược điểm} \\
+        \hline
+        Phát triển & Các team có thể phát triển service độc lập. & Cần thống nhất API contract. \\
+        \hline
+        Triển khai & Có thể deploy từng service. & Số lượng container và cấu hình tăng. \\
+        \hline
+        Dữ liệu & Ownership dữ liệu rõ ràng. & Khó query dữ liệu liên service. \\
+        \hline
+        Hiệu năng & Scale được từng phần theo tải. & Có thêm network latency. \\
+        \hline
+        Bảo trì & Codebase từng service nhỏ hơn. & Cần logging và monitoring tốt hơn. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\section{Bài tập thực hành}
+\label{section:4.11}
+
+Phần này gợi ý các bài tập để sinh viên hiện thực từng phần của hệ thống. Mục tiêu là giúp sinh viên hiểu cách chuyển từ thiết kế kiến trúc sang hệ thống có thể chạy được bằng Docker Compose.
+
+\begin{table}[H]
+    \centering
+    \caption{Danh sách bài tập thực hành}
+    \label{tab:chapter4-practice-exercises}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.14\textwidth}|p{0.42\textwidth}|p{0.34\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Bài tập} & \textbf{Yêu cầu} & \textbf{Kết quả cần nộp} \\
+        \hline
+        BT1 & Thiết kế route Gateway cho Product, User và Order Service. & File nginx.conf và bảng route. \\
+        \hline
+        BT2 & Docker hóa Product Service. & Dockerfile và image chạy được. \\
+        \hline
+        BT3 & Cài đặt JWT login trong User Service. & API login trả access token. \\
+        \hline
+        BT4 & Tạo luồng mua hàng cơ bản. & API test hoặc sequence diagram. \\
+        \hline
+        BT5 & Bổ sung logging có service name và request id. & Log mẫu của ít nhất hai service. \\
+        \hline
+        BT6 & Viết hướng dẫn chạy toàn hệ thống. & docker-compose.yml và tài liệu chạy thử. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\section{Checklist đánh giá}
+\label{section:4.12}
+
+Checklist dưới đây dùng để tự đánh giá mức độ hoàn thiện của hệ thống sau khi triển khai. Một hệ thống đạt yêu cầu cần có kiến trúc rõ ràng, route Gateway đầy đủ, xác thực cơ bản, Docker Compose chạy được, luồng mua hàng end-to-end và tài liệu hướng dẫn kiểm thử.
+
+\begin{table}[H]
+    \centering
+    \caption{Checklist đánh giá hệ thống hoàn chỉnh}
+    \label{tab:chapter4-checklist}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.24\textwidth}|p{0.52\textwidth}|p{0.12\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Nhóm đánh giá} & \textbf{Tiêu chí} & \textbf{Đạt} \\
+        \hline
+        Kiến trúc & Có sơ đồ tổng thể của hệ thống. & $\checkmark$ \\
+        \hline
+        Kiến trúc & Service được phân theo bounded context. & $\checkmark$ \\
+        \hline
+        API Gateway & Có route đến các service chính. & $\checkmark$ \\
+        \hline
+        Security & Có JWT authentication. & $\checkmark$ \\
+        \hline
+        Security & Có phân quyền Admin và Customer. & $\checkmark$ \\
+        \hline
+        Database & Mỗi service có database riêng. & $\checkmark$ \\
+        \hline
+        Communication & Service giao tiếp qua REST API. & $\checkmark$ \\
+        \hline
+        Docker & Mỗi service có Dockerfile. & $\checkmark$ \\
+        \hline
+        Docker & Có docker-compose.yml chạy được. & $\checkmark$ \\
+        \hline
+        Flow & Có mô tả luồng mua hàng end-to-end. & $\checkmark$ \\
+        \hline
+        Logging & Có log request theo service. & $\checkmark$ \\
+        \hline
+        Monitoring & Có health check hoặc metrics cơ bản. & $\checkmark$ \\
+        \hline
+        Evaluation & Có đánh giá ưu điểm và nhược điểm. & $\checkmark$ \\
+        \hline
+        Documentation & Có hướng dẫn chạy và kiểm thử hệ thống. & $\checkmark$ \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\end{document}

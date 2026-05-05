@@ -1,0 +1,1701 @@
+\documentclass[../main.tex]{subfiles}
+\begin{document}
+
+Chương này trình bày quá trình phân tích và thiết kế hệ thống thương mại điện tử theo kiến trúc microservices. Nội dung chương bắt đầu từ việc xác định yêu cầu chức năng, yêu cầu phi chức năng và các tác nhân tham gia hệ thống. Tiếp theo, chương áp dụng phương pháp Domain Driven Design để phân rã bài toán thành các bounded context, từ đó ánh xạ thành các microservice độc lập. Các service cốt lõi như Product Service, User Service, Cart Service, Order Service, Payment Service và Shipping Service được mô tả theo vai trò, mô hình dữ liệu, API, cơ sở dữ liệu và luồng nghiệp vụ. Cuối chương là phần mô tả luồng hệ thống tổng thể, hướng dẫn thực hành thiết kế class diagram, mapping sang database và checklist đánh giá.
+
+\section{Xác định yêu cầu}
+\label{section:2.1}
+
+Hệ thống E-Commerce được xây dựng nhằm hỗ trợ quy trình mua bán sản phẩm trực tuyến. Người dùng có thể tìm kiếm sản phẩm, xem chi tiết sản phẩm, thêm sản phẩm vào giỏ hàng, đặt hàng, thanh toán và theo dõi vận chuyển. Quản trị viên có thể quản lý sản phẩm, danh mục, đơn hàng, người dùng và theo dõi trạng thái hoạt động của hệ thống. Trong định hướng mở rộng, hệ thống còn tích hợp AI Service để tư vấn và gợi ý sản phẩm dựa trên hành vi người dùng.
+
+Việc xác định yêu cầu đóng vai trò quan trọng vì đây là cơ sở để phân rã hệ thống thành các service độc lập. Nếu yêu cầu không rõ ràng, ranh giới service dễ bị nhầm lẫn, dẫn đến tình trạng coupling cao hoặc chia service theo tầng kỹ thuật thay vì theo nghiệp vụ.
+
+\subsection{Functional Requirements}
+\label{subsection:2.1.1}
+
+Yêu cầu chức năng mô tả các nghiệp vụ mà hệ thống phải cung cấp cho người dùng cuối, quản trị viên và các thành phần bên ngoài. Bảng \ref{tab:chapter2-functional-requirements} liệt kê các chức năng chính của hệ thống.
+
+\begin{table}[H]
+    \centering
+    \caption{Danh sách yêu cầu chức năng của hệ thống E-Commerce}
+    \label{tab:chapter2-functional-requirements}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.12\textwidth}|p{0.38\textwidth}|p{0.18\textwidth}|p{0.22\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Mã} & \textbf{Yêu cầu chức năng} & \textbf{Độ ưu tiên} & \textbf{Service liên quan} \\
+        \hline
+        FR-01 & Người dùng xem danh sách sản phẩm, phân trang và lọc theo danh mục, giá, trạng thái còn hàng. & Cao & Product Service \\
+        \hline
+        FR-02 & Người dùng xem chi tiết sản phẩm gồm tên, mô tả, hình ảnh, giá, tồn kho và danh mục. & Cao & Product Service \\
+        \hline
+        FR-03 & Quản trị viên thêm, cập nhật, vô hiệu hóa sản phẩm và quản lý danh mục sản phẩm. & Cao & Product Service \\
+        \hline
+        FR-04 & Người dùng đăng ký, đăng nhập, cập nhật hồ sơ cá nhân và quản lý địa chỉ giao hàng. & Cao & User Service \\
+        \hline
+        FR-05 & Hệ thống hỗ trợ phân quyền theo vai trò như Guest, Customer và Admin. & Cao & User Service \\
+        \hline
+        FR-06 & Customer thêm sản phẩm vào giỏ hàng, cập nhật số lượng và xóa sản phẩm khỏi giỏ. & Cao & Cart Service \\
+        \hline
+        FR-07 & Customer tạo đơn hàng từ giỏ hàng, xem lịch sử và chi tiết đơn hàng. & Cao & Order Service \\
+        \hline
+        FR-08 & Hệ thống xử lý thanh toán bằng COD hoặc cổng thanh toán giả lập. & Cao & Payment Service \\
+        \hline
+        FR-09 & Hệ thống tạo vận đơn, tính phí giao hàng và cập nhật trạng thái vận chuyển. & Trung bình & Shipping Service \\
+        \hline
+        FR-10 & Hệ thống ghi nhận hành vi người dùng để phục vụ gợi ý sản phẩm bằng AI. & Trung bình & AI Service \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+Các yêu cầu trên cho thấy hệ thống không chỉ là một ứng dụng CRUD đơn giản mà bao gồm nhiều miền nghiệp vụ khác nhau. Mỗi nhóm chức năng có vòng đời dữ liệu, quy tắc xử lý và nhu cầu mở rộng riêng. Đây là cơ sở để lựa chọn kiến trúc microservices thay vì triển khai toàn bộ hệ thống trong một khối monolithic.
+
+\subsection{Non-functional Requirements}
+\label{subsection:2.1.2}
+
+Yêu cầu phi chức năng xác định các thuộc tính chất lượng của hệ thống. Đối với một nền tảng E-Commerce, các yếu tố như hiệu năng, bảo mật, khả năng mở rộng và độ tin cậy có ảnh hưởng trực tiếp đến trải nghiệm người dùng cũng như khả năng vận hành lâu dài.
+
+\begin{table}[H]
+    \centering
+    \caption{Yêu cầu phi chức năng của hệ thống}
+    \label{tab:chapter2-non-functional-requirements}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.2\textwidth}|p{0.42\textwidth}|p{0.28\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Nhóm yêu cầu} & \textbf{Mô tả} & \textbf{Tiêu chí đánh giá} \\
+        \hline
+        Hiệu năng & Các API phổ biến như xem danh sách sản phẩm, xem giỏ hàng và xem đơn hàng phải phản hồi nhanh trong điều kiện tải thông thường. & Thời gian phản hồi trung bình dưới 500ms đối với API đọc dữ liệu. \\
+        \hline
+        Khả năng mở rộng & Mỗi service có thể mở rộng độc lập theo nhu cầu tải. Product Service và Cart Service thường cần scale nhiều hơn trong các chiến dịch khuyến mãi. & Có thể tăng số instance của từng service mà không cần deploy lại toàn hệ thống. \\
+        \hline
+        Bảo mật & Hệ thống phải bảo vệ thông tin đăng nhập, phân quyền API và hạn chế truy cập trái phép vào dữ liệu người dùng. & Mật khẩu được hash, API dùng JWT, endpoint quản trị yêu cầu role Admin. \\
+        \hline
+        Độ tin cậy & Lỗi ở một service không được làm sập toàn bộ hệ thống. Ví dụ Payment Service lỗi thì vẫn cho phép xem sản phẩm và giỏ hàng. & Service lỗi được cô lập, API trả lỗi rõ ràng và có log phục vụ truy vết. \\
+        \hline
+        Tính nhất quán dữ liệu & Các service có database riêng, do đó hệ thống cần chấp nhận eventual consistency trong các luồng liên service. & Order, Payment và Shipping đồng bộ trạng thái thông qua API hoặc event. \\
+        \hline
+        Dễ bảo trì & Codebase của từng service cần có trách nhiệm rõ ràng, dễ kiểm thử và dễ thay đổi. & Thay đổi Product Service không làm ảnh hưởng trực tiếp đến User Service. \\
+        \hline
+        Khả năng triển khai & Hệ thống nên được docker hóa để triển khai trong môi trường local, staging và production. & Mỗi service có Dockerfile và cấu hình môi trường riêng. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Tác nhân hệ thống}
+\label{subsection:2.1.3}
+
+Các tác nhân tương tác với hệ thống bao gồm người dùng chưa đăng nhập, khách hàng đã đăng nhập, quản trị viên và một số hệ thống ngoài. Việc xác định actor giúp làm rõ quyền hạn, hành vi và trách nhiệm của từng nhóm người dùng.
+
+\begin{table}[H]
+    \centering
+    \caption{Các tác nhân chính của hệ thống}
+    \label{tab:chapter2-actors}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.22\textwidth}|p{0.64\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Tác nhân} & \textbf{Vai trò} \\
+        \hline
+        Guest & Người dùng chưa đăng nhập, có thể xem danh sách sản phẩm, tìm kiếm sản phẩm, xem chi tiết sản phẩm và đăng ký tài khoản. \\
+        \hline
+        Customer & Người dùng đã đăng nhập, có thể quản lý hồ sơ, thêm sản phẩm vào giỏ hàng, đặt hàng, thanh toán và theo dõi vận chuyển. \\
+        \hline
+        Admin & Người quản trị hệ thống, có quyền quản lý sản phẩm, danh mục, người dùng, đơn hàng, thanh toán và vận chuyển. \\
+        \hline
+        Payment Gateway & Hệ thống bên ngoài hoặc module giả lập chịu trách nhiệm xác nhận kết quả thanh toán. \\
+        \hline
+        Shipping Provider & Đơn vị vận chuyển hoặc module giả lập cập nhật trạng thái giao hàng và mã vận đơn. \\
+        \hline
+        AI Service & Thành phần phân tích hành vi người dùng và sinh danh sách sản phẩm gợi ý. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Use case tổng quát}
+\label{subsection:2.1.4}
+
+Ở mức tổng quát, các use case được chia theo actor. Guest chủ yếu thực hiện các thao tác đọc dữ liệu công khai. Customer thực hiện các nghiệp vụ mua hàng. Admin đảm nhận nghiệp vụ quản trị. Các hệ thống ngoài tham gia vào các luồng xử lý thanh toán, vận chuyển và gợi ý sản phẩm.
+
+\begin{table}[H]
+    \centering
+    \caption{Use case tổng quát của hệ thống}
+    \label{tab:chapter2-use-cases}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.2\textwidth}|p{0.34\textwidth}|p{0.34\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Actor} & \textbf{Use case} & \textbf{Mô tả ngắn} \\
+        \hline
+        Guest & Xem và tìm kiếm sản phẩm & Duyệt catalog, lọc danh mục, xem chi tiết sản phẩm trước khi đăng nhập. \\
+        \hline
+        Guest & Đăng ký tài khoản & Tạo tài khoản mới để trở thành Customer. \\
+        \hline
+        Customer & Quản lý giỏ hàng & Thêm, sửa số lượng và xóa sản phẩm trong giỏ hàng. \\
+        \hline
+        Customer & Đặt hàng & Chuyển giỏ hàng thành đơn hàng với thông tin giao hàng cụ thể. \\
+        \hline
+        Customer & Thanh toán & Chọn phương thức thanh toán và nhận kết quả giao dịch. \\
+        \hline
+        Customer & Theo dõi đơn hàng & Xem trạng thái xử lý, thanh toán và vận chuyển của đơn hàng. \\
+        \hline
+        Admin & Quản lý sản phẩm & Thêm, sửa, vô hiệu hóa sản phẩm và danh mục. \\
+        \hline
+        Admin & Quản lý đơn hàng & Theo dõi, xác nhận, hủy hoặc cập nhật trạng thái đơn hàng. \\
+        \hline
+        AI Service & Gợi ý sản phẩm & Sinh danh sách sản phẩm phù hợp dựa trên hành vi người dùng. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\section{Phân rã hệ thống theo DDD}
+\label{section:2.2}
+
+Domain Driven Design là phương pháp thiết kế phần mềm tập trung vào nghiệp vụ. Thay vì chia hệ thống theo các tầng kỹ thuật như controller, service, repository, DDD khuyến khích xác định ranh giới nghiệp vụ rõ ràng và xây dựng mô hình phản ánh ngôn ngữ của domain. Đối với hệ thống E-Commerce, phương pháp này đặc biệt phù hợp vì hệ thống bao gồm nhiều nghiệp vụ độc lập nhưng vẫn phối hợp với nhau trong quy trình mua hàng.
+
+\subsection{Xác định domain tổng thể}
+\label{subsection:2.2.1}
+
+Domain tổng thể của hệ thống là thương mại điện tử. Mục tiêu của domain này là hỗ trợ khách hàng mua sản phẩm trực tuyến, đồng thời hỗ trợ doanh nghiệp quản lý catalog, đơn hàng, thanh toán, vận chuyển và chăm sóc khách hàng. Domain này có thể được phân rã thành các subdomain như Bảng \ref{tab:chapter2-subdomains}.
+
+\begin{table}[H]
+    \centering
+    \caption{Các subdomain trong hệ thống E-Commerce}
+    \label{tab:chapter2-subdomains}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.22\textwidth}|p{0.3\textwidth}|p{0.44\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Subdomain} & \textbf{Loại} & \textbf{Mô tả} \\
+        \hline
+        Catalog & Supporting Domain & Quản lý thông tin sản phẩm, danh mục, hình ảnh, giá và tồn kho. \\
+        \hline
+        Identity & Supporting Domain & Quản lý tài khoản, xác thực, hồ sơ cá nhân, vai trò và quyền truy cập. \\
+        \hline
+        Cart & Supporting Domain & Quản lý giỏ hàng tạm thời trước khi tạo đơn hàng. \\
+        \hline
+        Ordering & Core Domain & Quản lý quy trình đặt hàng, trạng thái đơn hàng và dữ liệu snapshot của đơn. \\
+        \hline
+        Payment & Generic Domain & Xử lý thanh toán, trạng thái giao dịch và kết quả từ cổng thanh toán. \\
+        \hline
+        Shipping & Supporting Domain & Quản lý vận đơn, phí giao hàng, mã theo dõi và trạng thái vận chuyển. \\
+        \hline
+        Recommendation & Core Enhancement & Phân tích hành vi người dùng để gợi ý sản phẩm phù hợp. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Bounded Context}
+\label{subsection:2.2.2}
+
+Bounded Context là ranh giới trong đó một mô hình nghiệp vụ có ý nghĩa nhất quán. Cùng một thuật ngữ có thể mang ý nghĩa khác nhau trong các context khác nhau. Ví dụ, Product trong Product Context là đối tượng đầy đủ gồm mô tả, giá, tồn kho và hình ảnh; nhưng Product trong Order Context chỉ nên là snapshot tại thời điểm đặt hàng.
+
+\begin{table}[H]
+    \centering
+    \caption{Bounded Context và service tương ứng}
+    \label{tab:chapter2-bounded-contexts}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.24\textwidth}|p{0.36\textwidth}|p{0.36\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Bounded Context} & \textbf{Entity chính} & \textbf{Microservice tương ứng} \\
+        \hline
+        Product Context & Product, Category, ProductImage, Inventory & Product Service \\
+        \hline
+        User Context & User, Role, Permission, Address & User Service \\
+        \hline
+        Cart Context & Cart, CartItem & Cart Service \\
+        \hline
+        Order Context & Order, OrderItem, OrderStatusHistory & Order Service \\
+        \hline
+        Payment Context & Payment, PaymentEvent, Transaction & Payment Service \\
+        \hline
+        Shipping Context & Shipment, ShippingRate, ShipmentStatusHistory & Shipping Service \\
+        \hline
+        Recommendation Context & UserBehavior, ProductEmbedding, RecommendationResult & AI Service \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}[
+        entity/.style={draw=primary, rounded corners, fill=primary!10, text width=2.8cm, minimum height=1.15cm, align=center, font=\small},
+        relation/.style={->, thick, color=primary, rounded corners=6pt, shorten >=2pt, shorten <=2pt}
+    ]
+        % Khai báo các thành phần (giữ nguyên vị trí ban đầu)
+        \node[entity] (product) at (-4.6, 3.5) {\textbf{Product}\\Product\\Category\\ProductImage};
+        \node[entity] (user) at (4.6, 3.5) {\textbf{User}\\User\\Role\\Address};
+        \node[entity] (cart) at (-4.6, 0.4) {\textbf{Cart}\\Cart\\CartItem};
+        \node[entity] (order) at (0, 0.4) {\textbf{Order}\\Order\\OrderItem\\StatusHistory};
+        \node[entity] (ai) at (4.6, 0.4) {\textbf{AI}\\UserBehavior\\{\scriptsize ProductEmbedding}\\{\scriptsize RecommendationResult}};
+        \node[entity] (payment) at (-2.3, -3.0) {\textbf{Payment}\\Payment\\PaymentEvent};
+        \node[entity] (shipping) at (2.3, -3.0) {\textbf{Shipping}\\Shipment\\ShippingRate};
+
+        % 1. Các mũi tên kề nhau trực tiếp
+        \draw[relation] (product.south) -- (cart.north);
+        \draw[relation] (user.south) -- (ai.north);
+        \draw[relation] (cart.east) -- (order.west);
+        \draw[relation] (order.east) -- (ai.west);
+
+        % 2. Nhánh rẽ từ Order xuống Payment và Shipping
+        % Sử dụng xshift để tách 2 điểm xuất phát, tránh việc 2 mũi tên trùng nét nhau ở đoạn đầu
+        \draw[relation] ([xshift=-12pt]order.south) -- ++(0,-1.0) -| (payment.north);
+        \draw[relation] ([xshift=12pt]order.south) -- ++(0,-1.0) -| (shipping.north);
+
+        % 3. Mũi tên chéo khoảng cách xa (Product -> AI và User -> Cart)
+        % Định tuyến đi ra từ hông (east/west), vòng xuống khoảng trống giữa các node với độ cao khác nhau
+        \draw[relation] (product.east) -- ++(0.9,0) |- ([yshift=20pt]order.north) -| ([xshift=-15pt]ai.north);
+        \draw[relation] (user.west) -- ++(-0.9,0) |- ([yshift=40pt]order.north) -| ([xshift=15pt]cart.north);
+    \end{tikzpicture}
+    \caption{Sơ đồ model tổng quát giữa các bounded context}
+    \label{fig:chapter2-domain-model-diagram}
+\end{figure}
+
+\subsection{Context Map}
+\label{subsection:2.2.3}
+
+Context Map mô tả quan hệ giữa các bounded context. Trong hệ thống này, Product Service cung cấp dữ liệu sản phẩm cho Cart Service, Order Service và AI Service. Cart Service cung cấp dữ liệu giỏ hàng cho Order Service khi checkout. Order Service phối hợp với Payment Service và Shipping Service để hoàn tất vòng đời đơn hàng.
+
+\begin{table}[H]
+    \centering
+    \caption{Context Map giữa các service}
+    \label{tab:chapter2-context-map}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.22\textwidth}|p{0.22\textwidth}|p{0.44\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Nguồn} & \textbf{Đích} & \textbf{Quan hệ} \\
+        \hline
+        Cart Service & Product Service & Kiểm tra sản phẩm, giá và tồn kho trước khi thêm vào giỏ hàng. \\
+        \hline
+        Order Service & Cart Service & Lấy dữ liệu giỏ hàng khi người dùng checkout. \\
+        \hline
+        Order Service & Product Service & Kiểm tra lại giá và tồn kho tại thời điểm tạo đơn hàng. \\
+        \hline
+        Order Service & Payment Service & Tạo yêu cầu thanh toán và nhận kết quả giao dịch. \\
+        \hline
+        Order Service & Shipping Service & Tạo vận đơn sau khi đơn hàng hợp lệ hoặc thanh toán thành công. \\
+        \hline
+        AI Service & Product Service & Lấy metadata sản phẩm phục vụ mô hình gợi ý. \\
+        \hline
+        AI Service & User Service & Lấy định danh người dùng hoặc hành vi đã được cho phép xử lý. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Nguyên tắc tách service}
+\label{subsection:2.2.4}
+
+Việc tách service trong hệ thống tuân theo các nguyên tắc sau:
+
+\begin{itemize}
+    \item Tách theo năng lực nghiệp vụ thay vì tách theo tầng kỹ thuật.
+    \item Mỗi service sở hữu database riêng và không truy cập trực tiếp database của service khác.
+    \item Giao tiếp giữa service thông qua API hoặc event message.
+    \item Một service có thể triển khai, mở rộng và rollback độc lập.
+    \item Dữ liệu liên service nên dùng ID tham chiếu hoặc snapshot thay vì foreign key xuyên database.
+    \item Chấp nhận eventual consistency trong các luồng phức tạp như đặt hàng, thanh toán và vận chuyển.
+\end{itemize}
+
+\subsection{Mapping domain sang microservices}
+\label{subsection:2.2.5}
+
+Bảng \ref{tab:chapter2-domain-service-mapping} trình bày cách ánh xạ từ domain sang microservice. Đây là thiết kế nền tảng để triển khai hệ thống ở các chương sau.
+
+\begin{table}[H]
+    \centering
+    \caption{Mapping domain sang microservice}
+    \label{tab:chapter2-domain-service-mapping}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.18\textwidth}|p{0.22\textwidth}|p{0.18\textwidth}|p{0.32\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Domain} & \textbf{Microservice} & \textbf{Database} & \textbf{Lý do tách} \\
+        \hline
+        Catalog & Product Service & product\_db & Sản phẩm có vòng đời riêng, được đọc nhiều và cần scale độc lập. \\
+        \hline
+        Identity & User Service & user\_db & Dữ liệu người dùng cần bảo mật và có logic phân quyền riêng. \\
+        \hline
+        Cart & Cart Service & cart\_db & Giỏ hàng thay đổi thường xuyên, dữ liệu có tính tạm thời. \\
+        \hline
+        Ordering & Order Service & order\_db & Đơn hàng là trung tâm của nghiệp vụ mua hàng và cần lưu lịch sử rõ ràng. \\
+        \hline
+        Payment & Payment Service & payment\_db & Thanh toán có quy trình, trạng thái và yêu cầu kiểm soát riêng. \\
+        \hline
+        Shipping & Shipping Service & shipping\_db & Vận chuyển có trạng thái, phí giao hàng và mã theo dõi riêng. \\
+        \hline
+        Recommendation & AI Service & ai\_db & Dữ liệu hành vi và vector phục vụ mô hình AI cần lưu trữ riêng. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}[
+        service/.style={draw=primary, rounded corners, fill=primary!15, minimum width=2.7cm, minimum height=0.9cm, align=center, font=\small\bfseries},
+        db/.style={draw=primary, rounded corners, fill=primary!8, minimum height=0.9cm, minimum width=2cm, align=center, font=\small},
+        link/.style={->, thick, color=primary}
+    ]
+        \node[service] (product) at (0, 3.6) {Product\\Service};
+        \node[service] (user) at (4.8, 3.6) {User\\Service};
+        \node[service] (cart) at (9.6, 3.6) {Cart\\Service};
+        \node[service] (order) at (0, 0.4) {Order\\Service};
+        \node[service] (payment) at (4.8, 0.4) {Payment\\Service};
+        \node[service] (shipping) at (9.6, 0.4) {Shipping\\Service};
+        \node[service] (ai) at (4.8, -2.8) {AI\\Service};
+
+        \node[db] (productdb) at (0, 2.1) {product\_db};
+        \node[db] (userdb) at (4.8, 2.1) {user\_db};
+        \node[db] (cartdb) at (9.6, 2.1) {cart\_db};
+        \node[db] (orderdb) at (0, -1.1) {order\_db};
+        \node[db] (paymentdb) at (4.8, -1.1) {payment\_db};
+        \node[db] (shippingdb) at (9.6, -1.1) {shipping\_db};
+        \node[db] (aidb) at (4.8, -4.3) {ai\_db};
+
+        \draw[link] (product) -- (productdb);
+        \draw[link] (user) -- (userdb);
+        \draw[link] (cart) -- (cartdb);
+        \draw[link] (order) -- (orderdb);
+        \draw[link] (payment) -- (paymentdb);
+        \draw[link] (shipping) -- (shippingdb);
+        \draw[link] (ai) -- (aidb);
+    \end{tikzpicture}
+    \caption{Sơ đồ database-per-service của hệ thống}
+    \label{fig:chapter2-database-per-service-diagram}
+\end{figure}
+
+\section{Thiết kế Product Service}
+\label{section:2.3}
+
+Product Service chịu trách nhiệm quản lý catalog sản phẩm của hệ thống. Đây là service có tần suất đọc cao vì hầu hết người dùng đều bắt đầu hành trình mua sắm bằng việc xem hoặc tìm kiếm sản phẩm. Product Service cũng là nguồn dữ liệu đầu vào cho Cart Service, Order Service và AI Service.
+
+\subsection{Phân loại sản phẩm}
+\label{subsection:2.3.1}
+
+Sản phẩm có thể được phân loại theo danh mục, trạng thái và đặc điểm nghiệp vụ. Theo danh mục, hệ thống có thể hỗ trợ các nhóm như điện tử, thời trang, sách, gia dụng hoặc mỹ phẩm. Theo trạng thái, sản phẩm có thể là active, inactive, out of stock hoặc discontinued. Việc quản lý trạng thái giúp hệ thống không xóa cứng dữ liệu sản phẩm đã từng xuất hiện trong đơn hàng.
+
+\subsection{Model tổng quát}
+\label{subsection:2.3.2}
+
+Các entity chính của Product Service gồm Product, Category và ProductImage. Product là aggregate root vì mọi thao tác quản lý sản phẩm đều xoay quanh đối tượng này.
+
+\begin{lstlisting}[caption={Model tổng quát của Product Service}, label={lst:chapter2-product-model}]
+Product
+- id
+- name
+- description
+- price
+- stock_quantity
+- category_id
+- status
+- created_at
+- updated_at
+
+Category
+- id
+- name
+- parent_id
+
+ProductImage
+- id
+- product_id
+- image_url
+- is_thumbnail
+\end{lstlisting}
+
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}[
+        class/.style={draw=primary, rounded corners, fill=primary!10, text width=3.6cm, align=left, font=\small, minimum height=1.4cm},
+        link/.style={->, thick, color=primary},
+        note/.style={fill=white, inner sep=2pt, font=\scriptsize}
+    ]
+        \node[class] (product) at (0, 1.9) {\textbf{Product}\\id\\name\\description\\price\\stock\_quantity\\category\_id\\status\\created\_at\\updated\_at};
+        \node[class] (category) at (-4.6, -1.1) {\textbf{Category}\\id\\name\\parent\_id};
+        \node[class] (image) at (4.6, -1.1) {\textbf{ProductImage}\\id\\product\_id\\image\_url\\is\_thumbnail};
+        \draw[link] (category.east) -| node[pos=0.35, above, note]{1-n} (product.south west);
+        \draw[link] (product.south east) |- node[pos=0.35, above, note]{1-n} (image.west);
+    \end{tikzpicture}
+    \caption{Class diagram rút gọn của Product Service}
+    \label{fig:chapter2-product-model-diagram}
+\end{figure}
+
+\subsection{Chi tiết theo domain}
+\label{subsection:2.3.3}
+
+Trong Product Context, Product không chỉ là một bản ghi dữ liệu mà còn chứa các quy tắc nghiệp vụ. Giá sản phẩm không được âm, số lượng tồn kho không được nhỏ hơn 0, sản phẩm ở trạng thái inactive không được hiển thị cho Customer, và sản phẩm hết hàng không được thêm vào giỏ hàng. Khi Order Service tạo đơn hàng thành công, tồn kho cần được cập nhật hoặc giữ chỗ tùy theo chiến lược triển khai.
+
+\subsection{API}
+\label{subsection:2.3.4}
+
+\begin{table}[H]
+    \centering
+    \caption{API của Product Service}
+    \label{tab:chapter2-product-api}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.16\textwidth}|p{0.34\textwidth}|p{0.38\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Method} & \textbf{Endpoint} & \textbf{Mô tả} \\
+        \hline
+        GET & /products & Lấy danh sách sản phẩm, hỗ trợ phân trang và lọc. \\
+        \hline
+        GET & /products/\{id\} & Xem chi tiết một sản phẩm. \\
+        \hline
+        GET & /categories & Lấy danh sách danh mục sản phẩm. \\
+        \hline
+        POST & /products & Admin tạo sản phẩm mới. \\
+        \hline
+        PUT & /products/\{id\} & Admin cập nhật thông tin sản phẩm. \\
+        \hline
+        DELETE & /products/\{id\} & Admin vô hiệu hóa sản phẩm. \\
+        \hline
+        GET & /products/\{id\}/availability & Kiểm tra tồn kho và trạng thái bán. \\
+        \hline
+        PATCH & /products/\{id\}/stock & Cập nhật số lượng tồn kho. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Database schema}
+\label{subsection:2.3.5}
+
+\begin{table}[H]
+    \centering
+    \caption{Database schema chính của Product Service}
+    \label{tab:chapter2-product-db}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.22\textwidth}|p{0.22\textwidth}|p{0.18\textwidth}|p{0.28\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Table} & \textbf{Field} & \textbf{Type} & \textbf{Ghi chú} \\
+        \hline
+        products & id & UUID/INT & Primary key. \\
+        \hline
+        products & name & VARCHAR & Tên sản phẩm. \\
+        \hline
+        products & price & DECIMAL & Giá bán hiện tại. \\
+        \hline
+        products & stock\_quantity & INT & Số lượng tồn kho. \\
+        \hline
+        products & status & VARCHAR & active, inactive, out\_of\_stock. \\
+        \hline
+        categories & id & UUID/INT & Primary key của danh mục. \\
+        \hline
+        product\_images & product\_id & UUID/INT & Tham chiếu sản phẩm trong cùng database. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Các tình huống nghiệp vụ}
+\label{subsection:2.3.6}
+
+Các tình huống quan trọng của Product Service gồm: Admin thêm sản phẩm mới, Admin cập nhật giá hoặc tồn kho, Customer xem sản phẩm, Cart Service kiểm tra khả dụng của sản phẩm, và Order Service yêu cầu giảm tồn kho sau khi đơn hàng được xác nhận. Trong các tình huống liên service, Product Service chỉ cung cấp API và không cho service khác truy cập trực tiếp vào product\_db.
+
+\section{Thiết kế User Service}
+\label{section:2.4}
+
+User Service quản lý định danh, hồ sơ cá nhân, địa chỉ giao hàng và phân quyền. Service này có yêu cầu bảo mật cao vì chứa thông tin đăng nhập và dữ liệu cá nhân của người dùng.
+
+\subsection{Phân loại người dùng}
+\label{subsection:2.4.1}
+
+Hệ thống phân loại người dùng thành Guest, Customer và Admin. Guest là người dùng chưa đăng nhập, Customer là người dùng đã đăng nhập và có thể mua hàng, Admin là người quản trị có quyền thao tác trên dữ liệu quản trị.
+
+\begin{table}[H]
+    \centering
+    \caption{Phân loại người dùng và quyền chính}
+    \label{tab:chapter2-user-types}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.24\textwidth}|p{0.62\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Loại người dùng} & \textbf{Quyền chính} \\
+        \hline
+        Guest & Xem sản phẩm, tìm kiếm sản phẩm và đăng ký tài khoản. \\
+        \hline
+        Customer & Quản lý hồ sơ, địa chỉ, giỏ hàng, đơn hàng, thanh toán và vận chuyển. \\
+        \hline
+        Admin & Quản lý sản phẩm, danh mục, người dùng, đơn hàng, thanh toán và vận chuyển. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Model}
+\label{subsection:2.4.2}
+
+\begin{lstlisting}[caption={Model tổng quát của User Service}, label={lst:chapter2-user-model}]
+User
+- id
+- username
+- email
+- password_hash
+- full_name
+- phone
+- status
+- created_at
+
+Role
+- id
+- name
+
+Permission
+- id
+- code
+- description
+
+Address
+- id
+- user_id
+- receiver_name
+- phone
+- province
+- district
+- ward
+- detail
+- is_default
+\end{lstlisting}
+
+\begin{figure}[H]
+    \centering
+    \resizebox{0.95\textwidth}{!}{%
+    \begin{tikzpicture}[
+        class/.style={draw=primary, rounded corners, fill=primary!10, text width=3.6cm, align=left, font=\small, inner sep=5pt},
+        junction/.style={draw=primary, rounded corners, fill=primary!5, text width=3.1cm, align=left, font=\small, inner sep=5pt},
+        link/.style={-, thick, color=primary},
+        note/.style={fill=white, inner sep=2pt, font=\scriptsize}
+    ]
+        \node[class] (user) at (0, 3.4) {\textbf{User}\\id\\username\\email\\password\_hash\\full\_name\\phone\\status\\created\_at};
+        \node[class] (address) at (0, -3.8) {\textbf{Address}\\id\\user\_id\\receiver\_name\\phone\\province\\district\\ward\\detail\\is\_default};
+        \node[junction] (userRole) at (5.0, 3.4) {\textbf{UserRole}\\user\_id\\role\_id};
+        \node[class] (role) at (9.4, 3.4) {\textbf{Role}\\id\\name};
+        \node[junction] (rolePermission) at (9.4, 0.2) {\textbf{RolePermission}\\role\_id\\permission\_id};
+        \node[class] (permission) at (9.4, -3.2) {\textbf{Permission}\\id\\code\\description};
+        \draw[link] (user.east) -- node[above, note]{1-n} (userRole.west);
+        \draw[link] (userRole.east) -- node[above, note]{n-1} (role.west);
+        \draw[link] (role.south) -- node[right, note]{1-n} (rolePermission.north);
+        \draw[link] (rolePermission.south) -- node[right, note]{n-1} (permission.north);
+        \draw[link] (user.south) -- node[left, note]{1-n} (address.north);
+    \end{tikzpicture}%
+    }
+    \caption{Class diagram rút gọn của User Service}
+    \label{fig:chapter2-user-model-diagram}
+\end{figure}
+
+\subsection{Phân quyền RBAC}
+\label{subsection:2.4.3}
+
+RBAC, hay Role-Based Access Control, là cơ chế phân quyền dựa trên vai trò. User được gán một hoặc nhiều Role, Role chứa nhiều Permission. Cách thiết kế này giúp mở rộng quyền mà không cần sửa logic xác thực ở nhiều nơi.
+
+\begin{table}[H]
+    \centering
+    \caption{Ví dụ permission trong hệ thống}
+    \label{tab:chapter2-permissions}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.3\textwidth}|p{0.56\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Permission} & \textbf{Mô tả} \\
+        \hline
+        product.read & Xem thông tin sản phẩm. \\
+        \hline
+        product.write & Tạo, sửa hoặc vô hiệu hóa sản phẩm. \\
+        \hline
+        order.read & Xem thông tin đơn hàng. \\
+        \hline
+        order.manage & Quản lý trạng thái đơn hàng. \\
+        \hline
+        user.manage & Quản lý người dùng và vai trò. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{API}
+\label{subsection:2.4.4}
+
+\begin{table}[H]
+    \centering
+    \caption{API của User Service}
+    \label{tab:chapter2-user-api}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.16\textwidth}|p{0.34\textwidth}|p{0.38\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Method} & \textbf{Endpoint} & \textbf{Mô tả} \\
+        \hline
+        POST & /auth/register & Đăng ký tài khoản mới. \\
+        \hline
+        POST & /auth/login & Đăng nhập và nhận JWT token. \\
+        \hline
+        GET & /users/me & Xem hồ sơ cá nhân. \\
+        \hline
+        PUT & /users/me & Cập nhật hồ sơ cá nhân. \\
+        \hline
+        GET & /users/me/addresses & Lấy danh sách địa chỉ giao hàng. \\
+        \hline
+        POST & /users/me/addresses & Thêm địa chỉ giao hàng mới. \\
+        \hline
+        GET & /users/\{id\} & Admin xem thông tin người dùng. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Database schema}
+\label{subsection:2.4.5}
+
+Database của User Service gồm các bảng users, roles, permissions, user\_roles, role\_permissions và addresses. Các bảng trung gian user\_roles và role\_permissions hỗ trợ quan hệ nhiều-nhiều giữa user, role và permission.
+
+\subsection{Luồng đăng ký và đăng nhập}
+\label{subsection:2.4.6}
+
+\begin{lstlisting}[caption={Luồng đăng ký và đăng nhập}, label={lst:chapter2-auth-flow}]
+Dang ky:
+1. Customer nhap email, password va thong tin ca nhan.
+2. User Service kiem tra email da ton tai hay chua.
+3. User Service hash password.
+4. User Service tao User va gan role Customer.
+5. He thong tra ve ket qua dang ky.
+
+Dang nhap:
+1. Customer nhap email va password.
+2. User Service tim User theo email.
+3. User Service so sanh password voi password_hash.
+4. Neu hop le, User Service sinh JWT token.
+5. Client dung token de goi cac API can xac thuc.
+\end{lstlisting}
+
+\begin{figure}[H]
+    \centering
+    \resizebox{0.96\textwidth}{!}{%
+    \begin{tikzpicture}[
+        flowstep/.style={draw=primary, rounded corners, fill=primary!10, text width=3.0cm, minimum height=0.75cm, align=center, font=\scriptsize},
+        decision/.style={draw=primary, rounded corners, fill=primary!20, text width=3.4cm, minimum height=0.8cm, align=center, font=\scriptsize\bfseries},
+        line/.style={->, thick, color=primary, shorten >=2pt, shorten <=2pt}
+    ]
+        \node[flowstep] (guest) at (0, 5.2) {Guest / Client};
+        \node[decision] (choose) at (0, 3.4) {Chọn đăng ký hoặc đăng nhập};
+
+        \node[flowstep] (regForm) at (-6.4, 1.6) {Nhập email, mật khẩu và thông tin cá nhân};
+        \node[flowstep] (regValidate) at (-6.4, -0.2) {User Service kiểm tra dữ liệu và email trùng};
+        \node[flowstep] (regSave) at (-6.4, -2.0) {Hash mật khẩu và tạo tài khoản Customer};
+
+        \node[flowstep] (loginForm) at (6.4, 1.6) {Nhập email và mật khẩu};
+        \node[flowstep] (loginValidate) at (6.4, -0.2) {User Service kiểm tra tài khoản và mật khẩu};
+        \node[flowstep] (loginToken) at (6.4, -2.0) {Sinh JWT kèm vai trò người dùng};
+
+        \node[flowstep, text width=4.0cm] (error) at (0, -0.2) {Trả lỗi nếu dữ liệu không hợp lệ};
+        \node[flowstep, text width=4.8cm] (clientToken) at (0, -4.0) {Client lưu token và chuyển sang trạng thái đã đăng nhập};
+
+        \draw[line] (guest) -- (choose);
+        \draw[line] (choose.west) -| node[pos=0.28, above, font=\scriptsize]{Đăng ký} (regForm.north);
+        \draw[line] (choose.east) -| node[pos=0.28, above, font=\scriptsize]{Đăng nhập} (loginForm.north);
+
+        \draw[line] (regForm) -- (regValidate);
+        \draw[line] (regValidate) -- node[right, font=\scriptsize]{Hợp lệ} (regSave);
+        \draw[line] (regSave.south) |- (clientToken.west);
+
+        \draw[line] (loginForm) -- (loginValidate);
+        \draw[line] (loginValidate) -- node[right, font=\scriptsize]{Hợp lệ} (loginToken);
+        \draw[line] (loginToken.south) |- (clientToken.east);
+
+        \draw[line] (regValidate.east) -- node[above, font=\scriptsize]{Không hợp lệ} (error.west);
+        \draw[line] (loginValidate.west) -- node[above, font=\scriptsize]{Không hợp lệ} (error.east);
+        \draw[line] (error.north) -- (choose.south);
+    \end{tikzpicture}%
+    }
+    \caption{Luồng đăng ký và đăng nhập trong hệ thống}
+    \label{fig:chapter2-register-login-flow}
+\end{figure}
+
+\section{Thiết kế Cart Service}
+\label{section:2.5}
+
+Cart Service quản lý giỏ hàng của Customer trước khi tạo đơn hàng. Dữ liệu giỏ hàng có tính thay đổi thường xuyên và chưa phải dữ liệu giao dịch cuối cùng, do đó cần được tách riêng khỏi Order Service.
+
+\subsection{Model}
+\label{subsection:2.5.1}
+
+\begin{lstlisting}[caption={Model tổng quát của Cart Service}, label={lst:chapter2-cart-model}]
+Cart
+- id
+- user_id
+- status
+- created_at
+- updated_at
+
+CartItem
+- id
+- cart_id
+- product_id
+- product_name_snapshot
+- unit_price_snapshot
+- quantity
+\end{lstlisting}
+
+\begin{figure}[H]
+    \centering
+    \resizebox{0.95\textwidth}{!}{%
+    \begin{tikzpicture}[
+        class/.style={draw=primary, rounded corners, fill=primary!10, text width=3.8cm, align=left, font=\small, inner sep=5pt},
+        external/.style={draw=primary, rounded corners, dashed, fill=white, text width=3.4cm, align=center, font=\small, inner sep=5pt},
+        link/.style={-, thick, color=primary},
+        note/.style={fill=white, inner sep=2pt, font=\scriptsize}
+    ]
+        \node[class] (cart) at (0, 1.6) {\textbf{Cart}\\id\\user\_id\\status\\created\_at\\updated\_at};
+        \node[class] (item) at (5.6, 1.6) {\textbf{CartItem}\\id\\cart\_id\\product\_id\\product\_name\_snapshot\\unit\_price\_snapshot\\quantity};
+        \node[external] (userService) at (0, -2.4) {User Service\\xác thực customer};
+        \node[external] (product) at (5.6, -2.4) {Product Service\\kiểm tra sản phẩm, giá và tồn kho};
+        \draw[link] (cart.east) -- node[above, note]{1-n} (item.west);
+        \draw[link] (cart.south) -- node[left, note]{user\_id} (userService.north);
+        \draw[link] (item.south) -- node[right, note]{product\_id} (product.north);
+    \end{tikzpicture}%
+    }
+    \caption{Class diagram rút gọn của Cart Service}
+    \label{fig:chapter2-cart-model-diagram}
+\end{figure}
+
+\subsection{Logic xử lý giỏ hàng}
+\label{subsection:2.5.2}
+
+Mỗi Customer có một giỏ hàng active tại một thời điểm. Khi Customer thêm sản phẩm đã tồn tại trong giỏ, hệ thống tăng quantity thay vì tạo dòng mới. Quantity không được nhỏ hơn 1. Trước khi thêm sản phẩm, Cart Service gọi Product Service để kiểm tra sản phẩm có tồn tại, đang active và còn đủ tồn kho hay không.
+
+Cart Service lưu snapshot tên và giá sản phẩm tại thời điểm thêm vào giỏ nhằm hiển thị nhanh cho người dùng. Tuy nhiên, khi checkout, Order Service vẫn nên kiểm tra lại giá và tồn kho hiện tại để tránh đặt hàng với dữ liệu đã lỗi thời.
+
+\subsection{API}
+\label{subsection:2.5.3}
+
+\begin{table}[H]
+    \centering
+    \caption{API của Cart Service}
+    \label{tab:chapter2-cart-api}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.16\textwidth}|p{0.34\textwidth}|p{0.38\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Method} & \textbf{Endpoint} & \textbf{Mô tả} \\
+        \hline
+        GET & /cart & Xem giỏ hàng hiện tại. \\
+        \hline
+        POST & /cart/items & Thêm sản phẩm vào giỏ hàng. \\
+        \hline
+        PUT & /cart/items/\{id\} & Cập nhật số lượng sản phẩm. \\
+        \hline
+        DELETE & /cart/items/\{id\} & Xóa một sản phẩm khỏi giỏ hàng. \\
+        \hline
+        DELETE & /cart & Xóa toàn bộ giỏ hàng. \\
+        \hline
+        POST & /cart/checkout & Chuẩn bị dữ liệu để tạo đơn hàng. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Database schema}
+\label{subsection:2.5.4}
+
+\begin{table}[H]
+    \centering
+    \caption{Database schema chính của Cart Service}
+    \label{tab:chapter2-cart-db}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.22\textwidth}|p{0.24\textwidth}|p{0.18\textwidth}|p{0.26\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Table} & \textbf{Field} & \textbf{Type} & \textbf{Ghi chú} \\
+        \hline
+        carts & id & UUID/INT & Primary key. \\
+        \hline
+        carts & user\_id & UUID/INT & ID người dùng từ User Service. \\
+        \hline
+        carts & status & VARCHAR & active, checked\_out, abandoned. \\
+        \hline
+        cart\_items & product\_id & UUID/INT & ID sản phẩm từ Product Service. \\
+        \hline
+        cart\_items & unit\_price\_snapshot & DECIMAL & Giá tại thời điểm thêm vào giỏ. \\
+        \hline
+        cart\_items & quantity & INT & Số lượng sản phẩm. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Đồng bộ với Product Service}
+\label{subsection:2.5.5}
+
+Cart Service không lưu toàn bộ dữ liệu sản phẩm. Service này chỉ lưu product\_id và một số snapshot cần thiết để hiển thị. Khi cần dữ liệu chính xác, Cart Service gọi Product Service. Thiết kế này giúp tránh trùng lặp dữ liệu lớn và đảm bảo Product Service vẫn là nguồn sự thật về catalog.
+
+\section{Thiết kế Order Service}
+\label{section:2.6}
+
+Order Service là trung tâm của quy trình mua hàng. Service này tiếp nhận dữ liệu từ Cart Service, tạo đơn hàng, lưu snapshot sản phẩm tại thời điểm mua, quản lý trạng thái đơn hàng và phối hợp với Payment Service, Shipping Service.
+
+\subsection{Model}
+\label{subsection:2.6.1}
+
+\begin{lstlisting}[caption={Model tổng quát của Order Service}, label={lst:chapter2-order-model}]
+Order
+- id
+- user_id
+- status
+- total_amount
+- shipping_fee
+- payment_status
+- shipping_status
+- created_at
+
+OrderItem
+- id
+- order_id
+- product_id
+- product_name_snapshot
+- unit_price
+- quantity
+- subtotal
+
+OrderStatusHistory
+- id
+- order_id
+- old_status
+- new_status
+- changed_at
+\end{lstlisting}
+
+\begin{figure}[H]
+    \centering
+    \resizebox{0.95\textwidth}{!}{%
+    \begin{tikzpicture}[
+        class/.style={draw=primary, rounded corners, fill=primary!10, text width=3.9cm, align=left, font=\small, inner sep=5pt},
+        external/.style={draw=primary, rounded corners, dashed, fill=white, text width=3.2cm, align=center, font=\small, inner sep=5pt},
+        link/.style={-, thick, color=primary},
+        note/.style={fill=white, inner sep=2pt, font=\scriptsize}
+    ]
+        \node[class] (order) at (0, 3.4) {\textbf{Order}\\id\\user\_id\\status\\total\_amount\\shipping\_fee\\payment\_status\\shipping\_status\\created\_at};
+        \node[class] (item) at (5.8, 2.8) {\textbf{OrderItem}\\id\\order\_id\\product\_id\\product\_name\_snapshot\\unit\_price\\quantity\\subtotal};
+        \node[class] (history) at (0, -2.9) {\textbf{OrderStatusHistory}\\id\\order\_id\\old\_status\\new\_status\\changed\_at};
+        \node[external] (userService) at (-4.8, 2.8) {User Service\\xác thực customer};
+        \node[external] (paymentService) at (5.8, -0.7) {Payment Service\\tạo và cập nhật thanh toán};
+        \node[external] (shippingService) at (5.8, -3.5) {Shipping Service\\tạo và cập nhật vận chuyển};
+        \node[external] (productService) at (10.5, 2.8) {Product Service\\kiểm tra sản phẩm, giá và tồn kho};
+        \draw[link] (userService.east) -- node[above, note]{user\_id} (order.west);
+        \draw[link] (order.east) -- node[above, note]{1-n} (item.west);
+        \draw[link] (order.south) -- node[left, note]{1-n} (history.north);
+        \draw[link] (order.south east) -- node[left, note]{payment\_status} (paymentService.west);
+        \draw[link] (history.east) -- node[below, note]{shipping\_status} (shippingService.west);
+        \draw[link] (item.east) -- node[above, note]{product\_id} (productService.west);
+    \end{tikzpicture}%
+    }
+    \caption{Class diagram rút gọn của Order Service}
+    \label{fig:chapter2-order-model-diagram}
+\end{figure}
+
+\subsection{Workflow đặt hàng}
+\label{subsection:2.6.2}
+
+\begin{lstlisting}[caption={Workflow đặt hàng}, label={lst:chapter2-order-workflow}]
+1. Customer chon Checkout tu gio hang.
+2. Cart Service tra ve danh sach CartItem hop le.
+3. Order Service kiem tra lai san pham voi Product Service.
+4. Order Service tao Order voi trang thai PENDING.
+5. Order Service tao OrderItem tu du lieu snapshot.
+6. Order Service yeu cau Payment Service tao Payment.
+7. Neu can giao hang, Order Service yeu cau Shipping Service tao Shipment.
+8. He thong tra ve thong tin don hang cho Customer.
+\end{lstlisting}
+
+
+\begin{figure}[H]
+    \centering
+    \resizebox{0.98\textwidth}{!}{%
+    \begin{tikzpicture}[
+        actor/.style={draw=primary, rounded corners, fill=primary!20, text width=2.6cm, minimum height=0.75cm, align=center, font=\scriptsize\bfseries},
+        service/.style={draw=primary, rounded corners, fill=primary!10, text width=2.9cm, minimum height=0.8cm, align=center, font=\scriptsize},
+        process/.style={draw=primary, rounded corners, fill=white, text width=3.4cm, minimum height=0.85cm, align=center, font=\scriptsize},
+        line/.style={->, thick, color=primary, shorten >=2pt, shorten <=2pt}
+    ]
+        \node[actor] (customer) at (0, 3.4) {Customer};
+        \node[service] (cart) at (-5.8, 1.8) {Cart Service\\[1pt] trả CartItem hợp lệ};
+        \node[service] (order) at (0, 1.8) {Order Service\\[1pt] điều phối checkout};
+        \node[service] (product) at (5.8, 1.8) {Product Service\\[1pt] kiểm tra sản phẩm};
+
+        \node[process] (pending) at (0, 0.2) {Tạo Order trạng thái PENDING};
+        \node[process] (items) at (0, -1.3) {Tạo OrderItem từ dữ liệu snapshot};
+        \node[service] (payment) at (-5.8, -2.9) {Payment Service\\[1pt] tạo Payment};
+        \node[service] (shipping) at (5.8, -2.9) {Shipping Service\\[1pt] tạo Shipment nếu cần};
+        \node[actor] (response) at (0, -4.6) {Trả thông tin đơn hàng cho Customer};
+
+        \draw[line] (customer.south) -- node[right, font=\scriptsize]{Checkout} (order.north);
+        \draw[line] (order.west) -- node[above=2pt, font=\scriptsize]{Lấy giỏ hàng} (cart.east);
+        \draw[line] (cart.east) -- node[below=2pt, font=\scriptsize]{CartItem} (order.west);
+        \draw[line] (order.east) -- node[above=2pt, font=\scriptsize]{Kiểm tra giá / tồn kho} (product.west);
+        \draw[line] (product.west) -- node[below=2pt, font=\scriptsize]{Hợp lệ} (order.east);
+
+        \draw[line] (order.south) -- (pending.north);
+        \draw[line] (pending.south) -- (items.north);
+        \draw[line] (items.south west) |- (payment.east);
+        \draw[line] (items.south east) |- (shipping.west);
+        \draw[line] (payment.south) |- (response.west);
+        \draw[line] (shipping.south) |- (response.east);
+    \end{tikzpicture}%
+    }
+    \caption{Biểu đồ workflow đặt hàng}
+    \label{fig:chapter2-order-workflow}
+\end{figure}
+
+\subsection{Trạng thái đơn hàng}
+\label{subsection:2.6.3}
+
+\begin{table}[H]
+    \centering
+    \caption{Trạng thái đơn hàng}
+    \label{tab:chapter2-order-status}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.24\textwidth}|p{0.62\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Trạng thái} & \textbf{Ý nghĩa} \\
+        \hline
+        PENDING & Đơn hàng vừa được tạo, đang chờ thanh toán hoặc xác nhận. \\
+        \hline
+        PAID & Thanh toán thành công. \\
+        \hline
+        PROCESSING & Đơn hàng đang được chuẩn bị. \\
+        \hline
+        SHIPPED & Đơn hàng đã được giao cho đơn vị vận chuyển. \\
+        \hline
+        DELIVERED & Đơn hàng đã giao thành công. \\
+        \hline
+        CANCELLED & Đơn hàng đã bị hủy. \\
+        \hline
+        FAILED & Đơn hàng thất bại do lỗi thanh toán hoặc lỗi xử lý. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{API}
+\label{subsection:2.6.4}
+
+\begin{table}[H]
+    \centering
+    \caption{API của Order Service}
+    \label{tab:chapter2-order-api}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.16\textwidth}|p{0.34\textwidth}|p{0.38\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Method} & \textbf{Endpoint} & \textbf{Mô tả} \\
+        \hline
+        POST & /orders & Tạo đơn hàng mới. \\
+        \hline
+        GET & /orders & Lấy danh sách đơn hàng của user hiện tại. \\
+        \hline
+        GET & /orders/\{id\} & Xem chi tiết đơn hàng. \\
+        \hline
+        PATCH & /orders/\{id\}/cancel & Hủy đơn hàng nếu còn hợp lệ. \\
+        \hline
+        PATCH & /orders/\{id\}/status & Admin cập nhật trạng thái đơn hàng. \\
+        \hline
+        POST & /orders/\{id\}/payment-callback & Nhận kết quả thanh toán từ Payment Service. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Database schema}
+\label{subsection:2.6.5}
+
+Database của Order Service gồm orders, order\_items và order\_status\_history. OrderItem cần lưu snapshot tên sản phẩm, giá và số lượng tại thời điểm đặt hàng. Điều này giúp đơn hàng không bị thay đổi ý nghĩa khi Product Service cập nhật tên hoặc giá sản phẩm sau này.
+
+\subsection{Consistency và transaction boundary}
+\label{subsection:2.6.6}
+
+Trong kiến trúc microservices, Order Service không nên mở transaction trải dài sang Payment Service hoặc Shipping Service. Mỗi service chỉ đảm bảo transaction trong database của chính nó. Khi tạo đơn hàng, Order Service ghi dữ liệu order trước, sau đó gọi Payment Service và Shipping Service thông qua API hoặc event. Nếu một bước sau thất bại, hệ thống cần cập nhật trạng thái phù hợp thay vì rollback dữ liệu ở nhiều database.
+
+\section{Thiết kế Payment Service}
+\label{section:2.7}
+
+Payment Service chịu trách nhiệm quản lý giao dịch thanh toán. Service này tách riêng khỏi Order Service vì thanh toán thường có trạng thái riêng, tích hợp hệ thống ngoài và yêu cầu kiểm soát lỗi cẩn thận.
+
+\subsection{Model}
+\label{subsection:2.7.1}
+
+\begin{lstlisting}[caption={Model tổng quát của Payment Service}, label={lst:chapter2-payment-model}]
+Payment
+- id
+- order_id
+- user_id
+- amount
+- method
+- status
+- transaction_code
+- created_at
+- updated_at
+
+PaymentEvent
+- id
+- payment_id
+- event_type
+- payload
+- created_at
+\end{lstlisting}
+
+\begin{figure}[H]
+    \centering
+    \resizebox{0.95\textwidth}{!}{%
+    \begin{tikzpicture}[
+        class/.style={draw=primary, rounded corners, fill=primary!10, text width=3.9cm, align=left, font=\small, inner sep=5pt},
+        external/.style={draw=primary, rounded corners, dashed, fill=white, text width=3.4cm, align=center, font=\small, inner sep=5pt},
+        link/.style={-, thick, color=primary},
+        note/.style={fill=white, inner sep=2pt, font=\scriptsize}
+    ]
+        \node[class] (payment) at (0, 2.4) {\textbf{Payment}\\id\\order\_id\\user\_id\\amount\\method\\status\\transaction\_code\\created\_at\\updated\_at};
+        \node[class] (event) at (5.8, 2.4) {\textbf{PaymentEvent}\\id\\payment\_id\\event\_type\\payload\\created\_at};
+        \node[external] (orderService) at (-4.8, 2.4) {Order Service\\tạo yêu cầu thanh toán};
+        \node[external] (userService) at (0, -2.7) {User Service\\xác thực customer};
+        \node[external] (gateway) at (5.8, -2.7) {Payment Gateway\\SUCCESS/FAILED/REFUNDED};
+        \draw[link] (orderService.east) -- node[above, note]{order\_id} (payment.west);
+        \draw[link] (payment.east) -- node[above, note]{1-n} (event.west);
+        \draw[link] (payment.south) -- node[left, note]{user\_id} (userService.north);
+        \draw[link] (gateway.north) -- node[right, note]{callback} (event.south);
+    \end{tikzpicture}%
+    }
+    \caption{Class diagram rút gọn của Payment Service}
+    \label{fig:chapter2-payment-model-diagram}
+\end{figure}
+
+\subsection{Trạng thái thanh toán}
+\label{subsection:2.7.2}
+
+Các trạng thái thanh toán gồm PENDING, SUCCESS, FAILED, REFUNDED và CANCELLED. Trạng thái PENDING được tạo khi đơn hàng yêu cầu thanh toán. SUCCESS biểu thị giao dịch thành công. FAILED biểu thị thanh toán thất bại. REFUNDED dùng khi hoàn tiền. CANCELLED dùng khi người dùng hoặc hệ thống hủy giao dịch trước khi hoàn tất.
+
+\subsection{API}
+\label{subsection:2.7.3}
+
+\begin{table}[H]
+    \centering
+    \caption{API của Payment Service}
+    \label{tab:chapter2-payment-api}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.16\textwidth}|p{0.34\textwidth}|p{0.38\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Method} & \textbf{Endpoint} & \textbf{Mô tả} \\
+        \hline
+        POST & /payments & Tạo giao dịch thanh toán. \\
+        \hline
+        GET & /payments/\{id\} & Xem chi tiết giao dịch. \\
+        \hline
+        POST & /payments/\{id\}/confirm & Xác nhận thanh toán giả lập. \\
+        \hline
+        POST & /payments/\{id\}/cancel & Hủy giao dịch thanh toán. \\
+        \hline
+        POST & /payments/callback & Nhận callback từ payment gateway. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Database schema}
+\label{subsection:2.7.4}
+
+Payment Service sử dụng hai bảng chính: payments và payment\_events. Bảng payments lưu trạng thái hiện tại của giao dịch. Bảng payment\_events lưu lịch sử sự kiện, giúp truy vết khi có tranh chấp hoặc lỗi thanh toán.
+
+\subsection{Tích hợp cổng thanh toán giả lập}
+\label{subsection:2.7.5}
+
+Trong phạm vi tiểu luận, có thể triển khai payment gateway giả lập. Khi Customer chọn thanh toán, Payment Service tạo payment ở trạng thái PENDING. Gateway giả lập trả kết quả SUCCESS hoặc FAILED. Payment Service cập nhật trạng thái và gửi kết quả về Order Service để cập nhật trạng thái đơn hàng.
+
+\section{Thiết kế Shipping Service}
+\label{section:2.8}
+
+Shipping Service quản lý thông tin giao hàng, tính phí vận chuyển, mã vận đơn và trạng thái vận chuyển. Việc tách Shipping Service giúp hệ thống dễ tích hợp với nhiều đơn vị vận chuyển khác nhau trong tương lai.
+
+\subsection{Model}
+\label{subsection:2.8.1}
+
+\begin{lstlisting}[caption={Model tổng quát của Shipping Service}, label={lst:chapter2-shipping-model}]
+Shipment
+- id
+- order_id
+- user_id
+- receiver_name
+- receiver_phone
+- address
+- shipping_fee
+- status
+- tracking_code
+- created_at
+
+ShippingRate
+- id
+- area_type
+- base_fee
+- extra_fee
+\end{lstlisting}
+
+\begin{figure}[H]
+    \centering
+    \resizebox{0.95\textwidth}{!}{%
+    \begin{tikzpicture}[
+        class/.style={draw=primary, rounded corners, fill=primary!10, text width=3.9cm, align=left, font=\small, inner sep=5pt},
+        external/.style={draw=primary, rounded corners, dashed, fill=white, text width=3.3cm, align=center, font=\small, inner sep=5pt},
+        link/.style={-, thick, color=primary},
+        note/.style={fill=white, inner sep=2pt, font=\scriptsize}
+    ]
+        \node[class] (shipment) at (0, 3.4) {\textbf{Shipment}\\id\\order\_id\\user\_id\\receiver\_name\\receiver\_phone\\address\\shipping\_fee\\status\\tracking\_code\\created\_at};
+        \node[class] (rate) at (-5.2, -2.7) {\textbf{ShippingRate}\\id\\area\_type\\base\_fee\\extra\_fee};
+        \node[class] (history) at (5.2, -2.7) {\textbf{ShipmentStatusHistory}\\id\\shipment\_id\\status\\changed\_at};
+        \node[external] (orderService) at (-5.2, 2.8) {Order Service\\tạo yêu cầu giao hàng};
+        \node[external] (userService) at (5.2, 2.8) {User Service\\thông tin customer};
+        \draw[link] (orderService.east) -- node[above, note]{order\_id} (shipment.west);
+        \draw[link] (shipment.east) -- node[above, note]{user\_id} (userService.west);
+        \draw[link] (rate.north) -- node[left, note]{fee rule} (shipment.south west);
+        \draw[link] (shipment.south east) -- node[right, note]{1-n} (history.north);
+    \end{tikzpicture}%
+    }
+    \caption{Class diagram rút gọn của Shipping Service}
+    \label{fig:chapter2-shipping-model-diagram}
+\end{figure}
+
+\subsection{Trạng thái vận chuyển}
+\label{subsection:2.8.2}
+
+\begin{table}[H]
+    \centering
+    \caption{Trạng thái vận chuyển}
+    \label{tab:chapter2-shipping-status}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.26\textwidth}|p{0.6\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Trạng thái} & \textbf{Ý nghĩa} \\
+        \hline
+        PENDING & Vận đơn vừa được tạo, chưa bàn giao. \\
+        \hline
+        READY\_TO\_SHIP & Đơn hàng đã sẵn sàng giao cho đơn vị vận chuyển. \\
+        \hline
+        SHIPPING & Đơn hàng đang trên đường giao. \\
+        \hline
+        DELIVERED & Đơn hàng đã giao thành công. \\
+        \hline
+        FAILED & Giao hàng thất bại. \\
+        \hline
+        RETURNED & Đơn hàng được hoàn về. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{API}
+\label{subsection:2.8.3}
+
+\begin{table}[H]
+    \centering
+    \caption{API của Shipping Service}
+    \label{tab:chapter2-shipping-api}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.16\textwidth}|p{0.36\textwidth}|p{0.36\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Method} & \textbf{Endpoint} & \textbf{Mô tả} \\
+        \hline
+        POST & /shipments & Tạo vận đơn cho đơn hàng. \\
+        \hline
+        GET & /shipments/\{id\} & Xem thông tin vận chuyển. \\
+        \hline
+        GET & /shipments/order/\{order\_id\} & Xem vận chuyển theo đơn hàng. \\
+        \hline
+        PATCH & /shipments/\{id\}/status & Cập nhật trạng thái vận chuyển. \\
+        \hline
+        POST & /shipments/calculate-fee & Tính phí vận chuyển. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Database schema và tính phí giao hàng}
+\label{subsection:2.8.4}
+
+Database của Shipping Service gồm shipments, shipment\_status\_history và shipping\_rates. Bảng shipments lưu thông tin giao hàng hiện tại, shipment\_status\_history lưu lịch sử thay đổi trạng thái, còn shipping\_rates lưu cấu hình phí theo khu vực.
+
+Công thức tính phí đơn giản có thể được mô tả như sau:
+
+\begin{lstlisting}[caption={Công thức tính phí giao hàng}, label={lst:chapter2-shipping-fee}]
+shipping_fee = base_fee + distance_fee + weight_fee
+\end{lstlisting}
+
+Trong bản triển khai cơ bản, hệ thống có thể cấu hình phí cố định: nội thành 20.000 VND, ngoại thành 35.000 VND và khác tỉnh 50.000 VND.
+
+\section{Luồng hệ thống tổng thể}
+\label{section:2.9}
+
+Sau khi thiết kế từng service, cần mô tả cách các service phối hợp với nhau trong các nghiệp vụ chính. Phần này trình bày các luồng tổng thể từ lúc người dùng xem sản phẩm đến khi đơn hàng được giao.
+
+\subsection{Luồng xem sản phẩm}
+\label{subsection:2.9.1}
+
+\begin{lstlisting}[caption={Luồng xem sản phẩm}, label={lst:chapter2-view-product-flow}]
+1. Customer gui yeu cau xem danh sach san pham.
+2. API Gateway chuyen request den Product Service.
+3. Product Service truy van product_db.
+4. Product Service tra danh sach san pham da phan trang.
+5. Customer xem ket qua tren giao dien.
+\end{lstlisting}
+
+\begin{figure}[H]
+    \centering
+    \resizebox{0.96\textwidth}{!}{%
+    \begin{tikzpicture}[
+        actor/.style={draw=primary, rounded corners, fill=primary!20, text width=2.7cm, minimum height=0.85cm, align=center, font=\scriptsize\bfseries},
+        service/.style={draw=primary, rounded corners, fill=primary!10, text width=3.0cm, minimum height=0.85cm, align=center, font=\scriptsize},
+        database/.style={draw=primary, rounded corners, fill=primary!10, text width=2.6cm, minimum height=0.9cm, align=center, font=\scriptsize},
+        result/.style={draw=primary, rounded corners, fill=white, text width=3.3cm, minimum height=0.85cm, align=center, font=\scriptsize},
+        line/.style={->, thick, color=primary, shorten >=2pt, shorten <=2pt}
+    ]
+        \node[actor] (customer) at (0, 2.8) {Customer};
+        \node[service] (gateway) at (0, 1.2) {API Gateway};
+        \node[service] (product) at (0, -0.4) {Product Service};
+        \node[database] (db) at (5.8, -0.4) {product\_db};
+        \node[result] (result) at (0, -2.2) {Danh sách sản phẩm đã phân trang};
+        \node[actor] (ui) at (0, -3.8) {Giao diện hiển thị kết quả};
+
+        \draw[line] (customer) -- node[right, font=\scriptsize]{Yêu cầu xem danh sách} (gateway);
+        \draw[line] (gateway) -- node[right, font=\scriptsize]{Chuyển request} (product);
+        \draw[line] (product.east) -- node[pos=0.5, above=5pt, font=\scriptsize]{Truy vấn} (db.west);
+        \draw[line] (db.west) -- node[pos=0.5, below=5pt, font=\scriptsize]{Dữ liệu sản phẩm} (product.east);
+        \draw[line] (product) -- node[right, font=\scriptsize]{Phân trang} (result);
+        \draw[line] (result) -- node[right, font=\scriptsize]{Trả kết quả} (ui);
+    \end{tikzpicture}%
+    }
+    \caption{Biểu đồ luồng xem sản phẩm}
+    \label{fig:chapter2-view-product-flow}
+\end{figure}
+
+\subsection{Luồng thêm vào giỏ hàng}
+\label{subsection:2.9.2}
+
+\begin{lstlisting}[caption={Luồng thêm sản phẩm vào giỏ hàng}, label={lst:chapter2-add-cart-flow}]
+1. Customer chon san pham va so luong.
+2. Cart Service nhan product_id va quantity.
+3. Cart Service goi Product Service de kiem tra ton kho.
+4. Product Service tra thong tin san pham hop le.
+5. Cart Service tao hoac cap nhat CartItem.
+6. Cart Service tra gio hang moi cho Customer.
+\end{lstlisting}
+
+\begin{figure}[H]
+    \centering
+    \resizebox{0.98\textwidth}{!}{%
+    \begin{tikzpicture}[
+        actor/.style={draw=primary, rounded corners, fill=primary!20, text width=2.8cm, minimum height=0.85cm, align=center, font=\scriptsize\bfseries},
+        service/.style={draw=primary, rounded corners, fill=primary!10, text width=3.0cm, minimum height=0.85cm, align=center, font=\scriptsize},
+        process/.style={draw=primary, rounded corners, fill=white, text width=3.5cm, minimum height=0.9cm, align=center, font=\scriptsize},
+        line/.style={->, thick, color=primary, shorten >=2pt, shorten <=2pt}
+    ]
+        \node[actor] (customer) at (0, 3.4) {Customer};
+        \node[process] (select) at (0, 1.9) {Chọn sản phẩm và số lượng};
+        \node[service] (cart) at (0, 0.3) {Cart Service nhận product\_id và quantity};
+        \node[service] (product) at (5.6, 0.3) {Product Service kiểm tra tồn kho};
+        \node[process] (cartItem) at (0, -1.5) {Tạo mới hoặc cập nhật CartItem};
+        \node[actor] (response) at (0, -3.2) {Trả giỏ hàng mới cho Customer};
+
+        \draw[line] (customer) -- node[right, font=\scriptsize]{Thao tác thêm giỏ hàng} (select);
+        \draw[line] (select) -- node[right, font=\scriptsize]{Gửi dữ liệu} (cart);
+        \draw[line] (cart.east) -- node[pos=0.5, above=5pt, font=\scriptsize]{Kiểm tra tồn kho} (product.west);
+        \draw[line] (product.west) -- node[pos=0.5, below=5pt, font=\scriptsize]{Sản phẩm hợp lệ} (cart.east);
+        \draw[line] (cart) -- node[right, font=\scriptsize]{Cập nhật giỏ hàng} (cartItem);
+        \draw[line] (cartItem) -- node[right, font=\scriptsize]{Trả kết quả} (response);
+    \end{tikzpicture}%
+    }
+    \caption{Biểu đồ luồng thêm sản phẩm vào giỏ hàng}
+    \label{fig:chapter2-add-cart-flow}
+\end{figure}
+
+\subsection{Luồng đặt hàng}
+\label{subsection:2.9.3}
+
+\begin{lstlisting}[caption={Luồng đặt hàng}, label={lst:chapter2-checkout-flow}]
+1. Customer bam Checkout.
+2. Cart Service cung cap du lieu gio hang hien tai.
+3. Order Service kiem tra lai gia va ton kho.
+4. Order Service tao Order va OrderItem.
+5. Order Service tao yeu cau thanh toan tai Payment Service.
+6. Order Service tao yeu cau van chuyen tai Shipping Service.
+7. He thong tra ve ma don hang cho Customer.
+\end{lstlisting}
+
+\begin{figure}[H]
+    \centering
+    \resizebox{0.98\textwidth}{!}{%
+    \begin{tikzpicture}[
+        actor/.style={draw=primary, rounded corners, fill=primary!20, text width=2.8cm, minimum height=0.85cm, align=center, font=\scriptsize\bfseries},
+        service/.style={draw=primary, rounded corners, fill=primary!10, text width=3.1cm, minimum height=0.9cm, align=center, font=\scriptsize},
+        process/.style={draw=primary, rounded corners, fill=white, text width=3.6cm, minimum height=0.9cm, align=center, font=\scriptsize},
+        line/.style={->, thick, color=primary, shorten >=2pt, shorten <=2pt}
+    ]
+        \node[actor] (customer) at (0, 4.0) {Customer};
+        \node[service] (cart) at (-5.6, 2.3) {Cart Service cung cấp dữ liệu giỏ hàng};
+        \node[service] (order) at (0, 2.3) {Order Service điều phối đặt hàng};
+        \node[process] (validate) at (0, 0.7) {Kiểm tra lại giá và tồn kho};
+        \node[process] (createOrder) at (0, -0.9) {Tạo Order và OrderItem};
+        \node[service] (payment) at (-5.6, -2.6) {Payment Service tạo yêu cầu thanh toán};
+        \node[service] (shipping) at (5.6, -2.6) {Shipping Service tạo yêu cầu vận chuyển};
+        \node[actor] (response) at (0, -4.4) {Trả mã đơn hàng cho Customer};
+
+        \draw[line] (customer) -- node[right, font=\scriptsize]{Bấm Checkout} (order);
+        \draw[line] (order.west) -- node[pos=0.5, above=5pt, font=\scriptsize]{Lấy giỏ hàng} (cart.east);
+        \draw[line] (cart.east) -- node[pos=0.5, below=5pt, font=\scriptsize]{Dữ liệu giỏ hàng} (order.west);
+        \draw[line] (order) -- node[right, font=\scriptsize]{Xác thực dữ liệu} (validate);
+        \draw[line] (validate) -- node[right, font=\scriptsize]{Hợp lệ} (createOrder);
+        \draw[line] (createOrder.south west) |- node[pos=0.25, above=4pt, font=\scriptsize]{Tạo Payment} (payment.east);
+        \draw[line] (createOrder.south east) |- node[pos=0.25, above=4pt, font=\scriptsize]{Tạo Shipment} (shipping.west);
+        \draw[line] (payment.south) |- (response.west);
+        \draw[line] (shipping.south) |- (response.east);
+    \end{tikzpicture}%
+    }
+    \caption{Biểu đồ luồng đặt hàng}
+    \label{fig:chapter2-checkout-flow}
+\end{figure}
+
+\subsection{Luồng thanh toán}
+\label{subsection:2.9.4}
+
+Payment Service xử lý thanh toán và trả kết quả về Order Service. Nếu thanh toán thành công, Order Service chuyển trạng thái đơn hàng sang PAID hoặc PROCESSING. Nếu thanh toán thất bại, Order Service giữ trạng thái PENDING hoặc chuyển sang FAILED tùy theo chính sách nghiệp vụ.
+
+
+\begin{figure}[H]
+    \centering
+    \resizebox{0.98\textwidth}{!}{%
+    \begin{tikzpicture}[
+        service/.style={draw=primary, rounded corners, fill=primary!10, text width=3.1cm, minimum height=0.9cm, align=center, font=\scriptsize},
+        process/.style={draw=primary, rounded corners, fill=white, text width=3.6cm, minimum height=0.9cm, align=center, font=\scriptsize},
+        decision/.style={draw=primary, rounded corners, fill=primary!20, text width=3.4cm, minimum height=0.9cm, align=center, font=\scriptsize\bfseries},
+        status/.style={draw=primary, rounded corners, fill=primary!10, text width=3.2cm, minimum height=0.85cm, align=center, font=\scriptsize},
+        line/.style={->, thick, color=primary, shorten >=2pt, shorten <=2pt}
+    ]
+        \node[service] (order) at (0, 3.4) {Order Service gửi yêu cầu thanh toán};
+        \node[service] (payment) at (0, 1.8) {Payment Service xử lý giao dịch};
+        \node[process] (callback) at (0, 0.2) {Trả kết quả thanh toán về Order Service};
+        \node[decision] (result) at (0, -1.4) {Thanh toán thành công?};
+        \node[status] (success) at (-5.2, -3.0) {Cập nhật đơn hàng sang PAID hoặc PROCESSING};
+        \node[status] (failed) at (5.2, -3.0) {Giữ PENDING hoặc chuyển sang FAILED};
+
+        \draw[line] (order) -- node[right, font=\scriptsize]{Payment request} (payment);
+        \draw[line] (payment) -- node[right, font=\scriptsize]{Kết quả giao dịch} (callback);
+        \draw[line] (callback) -- (result);
+        \draw[line] (result.west) -| node[pos=0.25, above=4pt, font=\scriptsize]{Có} (success.north);
+        \draw[line] (result.east) -| node[pos=0.25, above=4pt, font=\scriptsize]{Không} (failed.north);
+    \end{tikzpicture}%
+    }
+    \caption{Biểu đồ luồng thanh toán}
+    \label{fig:chapter2-payment-flow}
+\end{figure}
+\subsection{Luồng giao hàng}
+\label{subsection:2.9.5}
+
+Shipping Service tạo vận đơn sau khi đơn hàng hợp lệ. Trong quá trình vận chuyển, trạng thái shipment được cập nhật từ PENDING sang READY\_TO\_SHIP, SHIPPING và DELIVERED. Mỗi thay đổi quan trọng có thể được thông báo về Order Service để Customer theo dõi trạng thái đơn hàng.
+
+
+
+\begin{figure}[H]
+    \centering
+    \resizebox{0.98\textwidth}{!}{%
+    \begin{tikzpicture}[
+        service/.style={draw=primary, rounded corners, fill=primary!10, text width=3.3cm, minimum height=0.9cm, align=center, font=\scriptsize},
+        status/.style={draw=primary, rounded corners, fill=white, text width=2.8cm, minimum height=0.85cm, align=center, font=\scriptsize\bfseries},
+        actor/.style={draw=primary, rounded corners, fill=primary!20, text width=3.2cm, minimum height=0.85cm, align=center, font=\scriptsize\bfseries},
+        line/.style={->, thick, color=primary, rounded corners=6pt, shorten >=2pt, shorten <=2pt}
+    ]
+        \node[service] (order) at (0, 4.4) {Order Service gửi yêu cầu tạo vận đơn};
+        \node[service] (shipping) at (0, 2.7) {Shipping Service tạo Shipment};
+        \node[status] (pending) at (-6.3, 0.7) {PENDING};
+        \node[status] (ready) at (-2.1, 0.7) {READY\_TO\_SHIP};
+        \node[status] (shippingStatus) at (2.1, 0.7) {SHIPPING};
+        \node[status] (delivered) at (6.3, 0.7) {DELIVERED};
+        \node[service] (notify) at (0, -2.0) {Thông báo thay đổi trạng thái về Order Service};
+        \node[actor] (customer) at (0, -3.8) {Customer theo dõi trạng thái đơn hàng};
+
+        \draw[line] (order.south) -- node[right, font=\scriptsize]{Đơn hàng hợp lệ} (shipping.north);
+        \draw[line] (shipping.west) -| node[pos=0.28, above=5pt, font=\scriptsize]{Tạo vận đơn} (pending.north);
+        \draw[line] (pending.east) -- node[above=5pt, font=\scriptsize]{Chuẩn bị} (ready.west);
+        \draw[line] (ready.east) -- node[above=5pt, font=\scriptsize]{Bàn giao} (shippingStatus.west);
+        \draw[line] (shippingStatus.east) -- node[above=5pt, font=\scriptsize]{Giao thành công} (delivered.west);
+        \draw[line] (ready.south) -- ++(0,-1.0) -| node[pos=0.25, left, font=\scriptsize]{Cập nhật} (notify.north west);
+        \draw[line] (shippingStatus.south) -- node[right, font=\scriptsize]{Cập nhật} (notify.north);
+        \draw[line] (delivered.south) -- ++(0,-1.0) -| node[pos=0.25, right, font=\scriptsize]{Cập nhật} (notify.north east);
+        \draw[line] (notify.south) -- node[right, font=\scriptsize]{Cập nhật hiển thị} (customer.north);
+    \end{tikzpicture}%
+    }
+    \caption{Biểu đồ luồng giao hàng}
+    \label{fig:chapter2-shipping-flow}
+\end{figure}
+\subsection{Sequence tổng thể}
+\label{subsection:2.9.6}
+
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}[
+        flowbox/.style={draw=primary, rounded corners, fill=primary!10, text width=2.35cm, minimum height=1cm, align=center, font=\small},
+        flow/.style={->, thick, color=primary}
+    ]
+        \node[flowbox] (client) at (0, 2) {Client};
+        \node[flowbox] (gateway) at (4, 2) {API Gateway};
+        \node[flowbox] (cart) at (8, 3.45) {Cart Service};
+        \node[flowbox] (product) at (12, 3.45) {Product Service};
+        \node[flowbox] (order) at (8, 0.55) {Order Service};
+        \node[flowbox] (payment) at (12, 0.55) {Payment Service};
+        \node[flowbox] (shipping) at (12, -1.9) {Shipping Service};
+
+        \draw[flow] (client) -- node[above=4pt, font=\scriptsize]{checkout} (gateway);
+        \draw[flow] (gateway) -- node[pos=0.55, left=6pt, font=\scriptsize]{create order} (order);
+        \draw[flow] (order) -- node[pos=0.55, left=6pt, font=\scriptsize]{get cart} (cart);
+        \draw[flow] (cart) -- node[above=4pt, font=\scriptsize]{check stock} (product);
+        \draw[flow] (order) -- node[above=4pt, font=\scriptsize]{payment} (payment);
+        \draw[flow] (order) -- node[pos=0.55, right=6pt, font=\scriptsize]{shipment} (shipping);
+        \draw[flow] (order) -- node[pos=0.48, below=6pt, font=\scriptsize]{result} (gateway);
+        \draw[flow] (gateway) -- node[below=4pt, font=\scriptsize]{order code} (client);
+    \end{tikzpicture}
+    \caption{Sơ đồ luồng checkout end-to-end giữa các service}
+    \label{fig:chapter2-checkout-flow-diagram}
+\end{figure}
+
+\begin{table}[H]
+    \centering
+    \caption{Sequence tổng thể cho luồng checkout}
+    \label{tab:chapter2-checkout-sequence}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.1\textwidth}|p{0.22\textwidth}|p{0.22\textwidth}|p{0.34\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Bước} & \textbf{Nguồn} & \textbf{Đích} & \textbf{Hành động} \\
+        \hline
+        1 & Client & API Gateway & Gửi yêu cầu checkout. \\
+        \hline
+        2 & API Gateway & Order Service & Chuyển request tạo đơn hàng. \\
+        \hline
+        3 & Order Service & Cart Service & Lấy giỏ hàng hiện tại. \\
+        \hline
+        4 & Order Service & Product Service & Kiểm tra giá và tồn kho. \\
+        \hline
+        5 & Order Service & Payment Service & Tạo payment ở trạng thái PENDING. \\
+        \hline
+        6 & Payment Service & Order Service & Trả kết quả thanh toán. \\
+        \hline
+        7 & Order Service & Shipping Service & Tạo vận đơn nếu đơn hàng hợp lệ. \\
+        \hline
+        8 & Order Service & Client & Trả thông tin đơn hàng. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\section{Hướng dẫn thực hành}
+\label{section:2.10}
+
+Phần này đưa ra các bước thực hành để sinh viên chuyển từ phân tích nghiệp vụ sang thiết kế kỹ thuật. Mục tiêu không chỉ là hiểu kiến trúc microservices ở mức khái niệm mà còn biết cách biểu diễn thành class diagram, database schema và API contract.
+
+\subsection{Mục tiêu}
+\label{subsection:2.10.1}
+
+Sau khi hoàn thành phần thực hành, sinh viên cần có các sản phẩm sau:
+
+\begin{itemize}
+    \item Class diagram cho từng service cốt lõi.
+    \item Database schema riêng cho từng service.
+    \item API contract cơ bản cho từng service.
+    \item Sequence diagram cho luồng checkout.
+    \item Bảng giải thích ranh giới service và lý do tách service.
+\end{itemize}
+
+\subsection{Hướng dẫn vẽ Class Diagram bằng Visual Paradigm}
+\label{subsection:2.10.2}
+
+Các bước thực hiện gồm tạo project mới, tạo package cho từng service, thêm class chính, khai báo thuộc tính, xác định quan hệ và export hình ảnh đưa vào báo cáo. Mỗi package nên tương ứng với một bounded context như product-service, user-service, cart-service, order-service, payment-service và shipping-service.
+
+\subsection{Mapping Class Diagram sang Database}
+\label{subsection:2.10.3}
+
+\begin{table}[H]
+    \centering
+    \caption{Quy tắc mapping từ UML sang database}
+    \label{tab:chapter2-uml-db-mapping}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.28\textwidth}|p{0.58\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Thành phần UML} & \textbf{Mapping sang database} \\
+        \hline
+        Class & Table. \\
+        \hline
+        Attribute & Column. \\
+        \hline
+        Association 1-n & Foreign key trong table phía nhiều. \\
+        \hline
+        Association n-n & Join table. \\
+        \hline
+        Enum & VARCHAR hoặc bảng lookup. \\
+        \hline
+        Composition & Table phụ thuộc vòng đời table chính. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Thiết kế database cho từng service}
+\label{subsection:2.10.4}
+
+Mỗi service cần có database riêng. Product Service dùng product\_db, User Service dùng user\_db, Cart Service dùng cart\_db, Order Service dùng order\_db, Payment Service dùng payment\_db và Shipping Service dùng shipping\_db. Các database này không tạo foreign key xuyên service. Nếu cần tham chiếu dữ liệu từ service khác, chỉ lưu ID hoặc snapshot.
+
+Ví dụ, order\_items nên lưu product\_id, product\_name\_snapshot, unit\_price và quantity. Cách làm này giúp đơn hàng phản ánh đúng dữ liệu tại thời điểm mua, ngay cả khi Product Service thay đổi tên hoặc giá sản phẩm sau đó.
+
+\subsection{So sánh MySQL và PostgreSQL}
+\label{subsection:2.10.5}
+
+\begin{table}[H]
+    \centering
+    \caption{So sánh MySQL và PostgreSQL cho hệ thống E-Commerce}
+    \label{tab:chapter2-mysql-postgresql}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.22\textwidth}|p{0.28\textwidth}|p{0.36\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Tiêu chí} & \textbf{MySQL} & \textbf{PostgreSQL} \\
+        \hline
+        Độ phổ biến & Rất phổ biến, dễ học và dễ triển khai. & Phổ biến trong các hệ thống yêu cầu dữ liệu phức tạp. \\
+        \hline
+        Transaction & Hỗ trợ tốt với InnoDB. & Hỗ trợ mạnh, tuân thủ ACID tốt. \\
+        \hline
+        JSON & Có hỗ trợ JSON. & Hỗ trợ JSONB mạnh và truy vấn linh hoạt. \\
+        \hline
+        Full-text search & Có hỗ trợ ở mức cơ bản. & Mạnh hơn và phù hợp truy vấn nâng cao. \\
+        \hline
+        Phù hợp bài tập lớn & Phù hợp vì dễ cài đặt và dễ học. & Phù hợp nếu muốn mở rộng truy vấn phức tạp. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+Trong phạm vi bài tập lớn, MySQL là lựa chọn dễ tiếp cận. Tuy nhiên, PostgreSQL phù hợp hơn nếu hệ thống cần xử lý dữ liệu JSON, truy vấn phức tạp hoặc mở rộng phân tích dữ liệu trong tương lai.
+
+\subsection{Bài tập}
+\label{subsection:2.10.6}
+
+Sinh viên có thể thực hiện các bài tập sau để củng cố nội dung chương:
+
+\begin{enumerate}
+    \item Vẽ class diagram cho Product Service.
+    \item Vẽ class diagram cho Order Service.
+    \item Thiết kế database schema cho Cart Service.
+    \item Viết API contract cho Payment Service.
+    \item Vẽ sequence diagram cho quy trình checkout.
+    \item Giải thích vì sao Order Service không được truy cập trực tiếp product\_db.
+    \item Đề xuất cách xử lý khi thanh toán thành công nhưng tạo shipment thất bại.
+\end{enumerate}
+
+\subsection{Checklist đánh giá}
+\label{subsection:2.10.7}
+
+\begin{table}[H]
+    \centering
+    \caption{Checklist đánh giá thiết kế Chapter 2}
+    \label{tab:chapter2-checklist}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.68\textwidth}|p{0.18\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Tiêu chí} & \textbf{Đạt/Không đạt} \\
+        \hline
+        Xác định đủ actor chính của hệ thống. & Đạt \\
+        \hline
+        Có danh sách functional requirements. & Đạt \\
+        \hline
+        Có danh sách non-functional requirements. & Đạt \\
+        \hline
+        Có bounded context và context map. & Đạt \\
+        \hline
+        Có ít nhất sáu service cốt lõi. & Đạt \\
+        \hline
+        Mỗi service có model và API. & Đạt \\
+        \hline
+        Mỗi service có database riêng. & Đạt \\
+        \hline
+        Có workflow checkout tổng thể. & Đạt \\
+        \hline
+        Có giải thích consistency và transaction boundary. & Đạt \\
+        \hline
+        Có bài tập thực hành và checklist đánh giá. & Đạt \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\section{Kết luận}
+\label{section:2.11}
+
+Chương này đã trình bày quá trình phân tích và thiết kế hệ thống E-Commerce theo kiến trúc microservices. Từ các yêu cầu chức năng và phi chức năng, hệ thống được phân rã theo Domain Driven Design thành nhiều bounded context độc lập. Mỗi bounded context được ánh xạ thành một microservice cụ thể, bao gồm Product Service, User Service, Cart Service, Order Service, Payment Service và Shipping Service. Các service được mô tả theo vai trò, model, API, database schema và luồng nghiệp vụ.
+
+Thiết kế này tạo nền tảng cho các chương tiếp theo. Trên cơ sở các service cốt lõi đã được xác định, hệ thống có thể mở rộng thêm AI Service để tư vấn và gợi ý sản phẩm, đồng thời triển khai API Gateway, xác thực JWT, containerization, logging và monitoring trong giai đoạn xây dựng hệ thống hoàn chỉnh.
+
+\end{document}

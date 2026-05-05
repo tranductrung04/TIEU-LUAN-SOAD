@@ -1,0 +1,372 @@
+\documentclass[../main.tex]{subfiles}
+\begin{document}
+
+Trong quá trình phát triển phần mềm, kiến trúc hệ thống thường thay đổi theo quy mô nghiệp vụ, số lượng người dùng và yêu cầu vận hành. Một hệ thống nhỏ có thể bắt đầu bằng kiến trúc nguyên khối để giảm chi phí phát triển ban đầu. Tuy nhiên, khi số lượng chức năng tăng lên, nhiều nhóm cùng tham gia phát triển và nhu cầu mở rộng từng thành phần trở nên rõ ràng hơn, kiến trúc nguyên khối bắt đầu bộc lộ nhiều giới hạn. Chương này trình bày quá trình chuyển dịch từ Monolithic Architecture sang Microservices Architecture, đồng thời giới thiệu Domain Driven Design như một phương pháp quan trọng để phân rã hệ thống theo đúng ranh giới nghiệp vụ.
+
+\section{Giới thiệu Monolithic Architecture}
+
+\subsection{Khái niệm}
+
+Monolithic Architecture là kiểu kiến trúc trong đó toàn bộ hệ thống phần mềm được xây dựng, đóng gói và triển khai như một khối duy nhất \cite{fowler2002patterns}. Các thành phần như giao diện người dùng, xử lý nghiệp vụ, truy cập dữ liệu và tích hợp với cơ sở dữ liệu thường nằm trong cùng một codebase. Khi cần triển khai phiên bản mới, toàn bộ ứng dụng được build và deploy cùng lúc, kể cả khi thay đổi chỉ nằm ở một chức năng nhỏ.
+
+Kiến trúc này thường xuất hiện trong giai đoạn đầu của dự án vì đơn giản, dễ phát triển và dễ kiểm thử trong phạm vi nhỏ. Đối với một nhóm phát triển ít người, việc duy trì một ứng dụng duy nhất giúp giảm số lượng thành phần cần quản lý. Tuy nhiên, lợi thế này giảm dần khi hệ thống mở rộng về chức năng, dữ liệu và số lượng người dùng.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{chapter1_monolithic_architecture}
+    \caption{Mô hình tổng quan Monolithic Architecture}
+    \label{fig:chapter1_monolithic_architecture}
+\end{figure}
+
+\subsection{Cấu trúc điển hình}
+
+Một ứng dụng monolithic thường được tổ chức thành nhiều lớp logic. Presentation Layer chịu trách nhiệm tiếp nhận yêu cầu từ người dùng hoặc hệ thống bên ngoài. Business Logic Layer xử lý các quy tắc nghiệp vụ chính. Data Access Layer thực hiện thao tác đọc, ghi dữ liệu. Bên dưới các lớp này là cơ sở dữ liệu dùng chung cho toàn bộ ứng dụng.
+
+Mặc dù các lớp được phân chia về mặt mã nguồn, chúng vẫn nằm trong cùng một ứng dụng triển khai. Điều này làm cho quá trình gọi hàm giữa các module trở nên đơn giản, nhưng đồng thời cũng khiến mức độ phụ thuộc nội bộ tăng lên khi hệ thống lớn dần.
+
+\begin{table}[H]
+    \centering
+    \caption{Vai trò các lớp trong kiến trúc Monolithic}
+    \label{tab:chapter1_monolithic_layers}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.28\textwidth}|p{0.62\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Thành phần} & \textbf{Vai trò} \\
+        \hline
+        Presentation Layer & Tiếp nhận request, hiển thị giao diện hoặc cung cấp API cho client. \\
+        \hline
+        Business Logic Layer & Xử lý quy tắc nghiệp vụ, điều phối các luồng chức năng chính của hệ thống. \\
+        \hline
+        Data Access Layer & Thực hiện truy vấn, cập nhật và ánh xạ dữ liệu giữa ứng dụng và cơ sở dữ liệu. \\
+        \hline
+        Database & Lưu trữ dữ liệu tập trung cho toàn bộ các module trong hệ thống. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Ví dụ thực tế}
+
+Trong một hệ thống thương mại điện tử nhỏ, các chức năng quản lý sản phẩm, quản lý người dùng, giỏ hàng, đặt hàng, thanh toán và vận chuyển có thể được đặt trong cùng một ứng dụng. Các module này dùng chung cơ sở dữ liệu và được triển khai trong cùng một gói phần mềm. Khi cần sửa chức năng thanh toán, toàn bộ ứng dụng vẫn phải được kiểm thử và triển khai lại.
+
+Cách tổ chức này phù hợp khi hệ thống còn nhỏ, lượng truy cập chưa cao và số lượng nhóm phát triển ít. Tuy nhiên, nếu chức năng thanh toán cần mở rộng độc lập hoặc chức năng đặt hàng có tần suất thay đổi cao hơn các chức năng còn lại, kiến trúc nguyên khối sẽ tạo ra chi phí vận hành và rủi ro triển khai lớn hơn.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{chapter1_ecommerce_monolith}
+    \caption{Ví dụ hệ thống E-Commerce triển khai theo Monolithic}
+    \label{fig:chapter1_ecommerce_monolith}
+\end{figure}
+
+\subsection{Nhược điểm chi tiết}
+
+Nhược điểm đầu tiên của Monolithic Architecture là khó mở rộng theo từng chức năng. Nếu module đặt hàng chịu tải cao, hệ thống thường phải nhân bản toàn bộ ứng dụng thay vì chỉ mở rộng riêng module đặt hàng. Điều này làm tăng chi phí tài nguyên và không phản ánh đúng nhu cầu thực tế của từng thành phần.
+
+Nhược điểm thứ hai là coupling giữa các module thường cao. Các module có thể gọi trực tiếp vào lớp xử lý hoặc truy cập dữ liệu của nhau. Khi thay đổi một phần nhỏ, nhóm phát triển phải kiểm tra tác động trên phạm vi lớn hơn vì lỗi có thể lan sang các chức năng khác.
+
+Nhược điểm thứ ba là rủi ro triển khai cao. Một lỗi trong chức năng ít quan trọng vẫn có thể làm ảnh hưởng đến toàn bộ ứng dụng. Khi codebase lớn, thời gian build, test và deploy cũng tăng lên, làm chậm chu kỳ phát hành phần mềm.
+
+Ngoài ra, Monolithic Architecture gây khó khăn khi nhiều nhóm cùng phát triển. Các nhóm phải phối hợp trên cùng một codebase, dùng chung pipeline triển khai và thường bị phụ thuộc vào lịch phát hành của nhau. Điều này làm giảm khả năng phát triển song song khi hệ thống tăng quy mô.
+
+\subsection{Khi nào nên dùng Monolithic}
+
+Monolithic Architecture không phải là một kiến trúc lỗi thời. Trong nhiều trường hợp, đây vẫn là lựa chọn phù hợp. Khi hệ thống còn nhỏ, yêu cầu nghiệp vụ chưa ổn định hoặc mục tiêu là xây dựng phiên bản MVP, kiến trúc nguyên khối giúp nhóm phát triển tập trung vào chức năng cốt lõi thay vì phải xử lý các vấn đề phức tạp của hệ thống phân tán.
+
+\begin{table}[H]
+    \centering
+    \caption{Trường hợp phù hợp với Monolithic Architecture}
+    \label{tab:chapter1_monolithic_fit}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.28\textwidth}|p{0.62\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Bối cảnh} & \textbf{Lý do phù hợp} \\
+        \hline
+        MVP & Cần triển khai nhanh, giảm chi phí thiết kế và vận hành ban đầu. \\
+        \hline
+        Nhóm phát triển nhỏ & Một codebase giúp việc phối hợp và kiểm soát thay đổi đơn giản hơn. \\
+        \hline
+        Hệ thống đơn giản & Không cần chia nhỏ service khi nghiệp vụ chưa đủ phức tạp. \\
+        \hline
+        Domain chưa ổn định & Tránh phân rã sai ranh giới quá sớm, giảm chi phí sửa đổi kiến trúc. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\section{Microservices Architecture}
+
+\subsection{Khái niệm}
+
+Microservices Architecture là kiểu kiến trúc chia hệ thống thành nhiều dịch vụ nhỏ, trong đó mỗi dịch vụ đảm nhiệm một năng lực nghiệp vụ riêng \cite{fowler2014microservices,newman2021building}. Mỗi service có thể được phát triển, kiểm thử, triển khai và mở rộng độc lập. Thay vì đóng gói toàn bộ hệ thống thành một ứng dụng duy nhất, microservices tổ chức hệ thống thành tập hợp các service giao tiếp với nhau thông qua API, message broker hoặc event.
+
+Trong kiến trúc này, mỗi service thường sở hữu dữ liệu của riêng mình. Service khác không truy cập trực tiếp vào cơ sở dữ liệu nội bộ mà phải thông qua API hoặc sự kiện được công bố. Cách tổ chức này giúp giảm phụ thuộc giữa các service và hỗ trợ khả năng mở rộng độc lập.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.98\textwidth]{chapter1_microservices_architecture}
+    \caption{Mô hình tổng quan Microservices Architecture}
+    \label{fig:chapter1_microservices_architecture}
+\end{figure}
+
+\subsection{Đặc điểm}
+
+Đặc điểm quan trọng của microservices là mỗi service tập trung vào một chức năng nghiệp vụ rõ ràng. Ví dụ, Product Service quản lý sản phẩm, Order Service quản lý đơn hàng và Payment Service xử lý thanh toán. Các service này có thể được triển khai độc lập nên thay đổi ở Payment Service không nhất thiết kéo theo việc triển khai lại Product Service.
+
+Một đặc điểm khác là mỗi service có thể dùng công nghệ phù hợp với yêu cầu riêng. Service cần xử lý dữ liệu quan hệ có thể dùng PostgreSQL, trong khi service cần truy xuất nhanh dữ liệu dạng key-value có thể dùng Redis. Tuy nhiên, sự linh hoạt này cũng yêu cầu đội ngũ phát triển có năng lực vận hành tốt hơn.
+
+\subsection{So sánh Monolithic vs Microservices}
+
+Monolithic và Microservices không đối lập tuyệt đối, mà phù hợp với những bối cảnh khác nhau \cite{newman2021building,richardson2018microservices}. Monolithic tối ưu cho sự đơn giản ở giai đoạn đầu, trong khi Microservices tối ưu cho khả năng mở rộng, triển khai độc lập và tổ chức nhiều nhóm phát triển khi hệ thống lớn.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.98\textwidth]{chapter1_monolith_vs_microservices}
+    \caption{So sánh trực quan Monolithic và Microservices}
+    \label{fig:chapter1_monolith_vs_microservices}
+\end{figure}
+
+\begin{table}[H]
+    \centering
+    \caption{So sánh Monolithic Architecture và Microservices Architecture}
+    \label{tab:chapter1_monolith_microservices_comparison}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.22\textwidth}|p{0.32\textwidth}|p{0.34\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Tiêu chí} & \textbf{Monolithic} & \textbf{Microservices} \\
+        \hline
+        Codebase & Một codebase lớn. & Nhiều codebase hoặc nhiều service độc lập. \\
+        \hline
+        Deployment & Triển khai toàn bộ hệ thống cùng lúc. & Triển khai độc lập từng service. \\
+        \hline
+        Scaling & Mở rộng toàn bộ ứng dụng. & Mở rộng riêng service có nhu cầu cao. \\
+        \hline
+        Database & Thường dùng chung một cơ sở dữ liệu. & Mỗi service sở hữu dữ liệu riêng. \\
+        \hline
+        Coupling & Dễ phát sinh phụ thuộc chặt giữa các module. & Giảm phụ thuộc thông qua API và event. \\
+        \hline
+        Vận hành & Đơn giản ở giai đoạn đầu. & Phức tạp hơn do là hệ thống phân tán. \\
+        \hline
+        Phù hợp & MVP, hệ thống nhỏ, nhóm ít người. & Hệ thống lớn, nhiều nhóm, yêu cầu scale độc lập. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Ưu điểm}
+
+Ưu điểm lớn nhất của microservices là khả năng mở rộng độc lập. Khi một service chịu tải cao, hệ thống chỉ cần tăng số lượng instance của service đó. Điều này giúp tối ưu tài nguyên và cải thiện khả năng đáp ứng của hệ thống.
+
+Microservices cũng hỗ trợ phát triển song song. Mỗi nhóm có thể chịu trách nhiệm một service hoặc một nhóm service theo domain nghiệp vụ. Nhờ đó, thay đổi trong một service ít ảnh hưởng đến lịch phát hành của các service khác nếu API contract được quản lý tốt.
+
+Ngoài ra, kiến trúc này giúp tăng khả năng chịu lỗi. Nếu một service gặp sự cố, hệ thống có thể cô lập lỗi và tiếp tục phục vụ các chức năng còn lại. Tuy nhiên, khả năng này chỉ đạt được khi hệ thống có thiết kế chịu lỗi, quan sát được trạng thái vận hành và có cơ chế xử lý lỗi phù hợp.
+
+\subsection{Nhược điểm}
+
+Microservices làm tăng độ phức tạp vì hệ thống trở thành hệ thống phân tán. Các lời gọi giữa service có thể thất bại do lỗi mạng, timeout hoặc service đích không sẵn sàng. Do đó, thiết kế microservices cần tính đến retry, timeout, circuit breaker và các cơ chế phục hồi phù hợp.
+
+Quản lý dữ liệu cũng khó hơn. Khi mỗi service sở hữu cơ sở dữ liệu riêng, việc đảm bảo nhất quán dữ liệu giữa các service không thể phụ thuộc vào transaction cục bộ đơn giản như trong monolithic \cite{kleppmann2017designing,richardson2018microservices}. Hệ thống thường phải dùng eventual consistency, event-driven communication hoặc saga pattern cho các quy trình nghiệp vụ trải dài qua nhiều service.
+
+Bên cạnh đó, microservices yêu cầu hạ tầng vận hành đầy đủ hơn, bao gồm logging tập trung, metrics, distributed tracing, service discovery, API gateway, containerization và CI/CD. Nếu thiếu các năng lực này, hệ thống microservices có thể khó debug và khó kiểm soát hơn monolithic.
+
+\subsection{Nguyên tắc thiết kế}
+
+Thiết kế microservices cần tuân thủ một số nguyên tắc để tránh tạo ra hệ thống phân tán nhưng vẫn coupling cao. Mỗi service nên có trách nhiệm rõ ràng, cohesion cao và coupling thấp. Service nên sở hữu dữ liệu của mình và chỉ công bố chức năng thông qua API hoặc event đã được định nghĩa rõ.
+
+\begin{table}[H]
+    \centering
+    \caption{Nguyên tắc thiết kế Microservices}
+    \label{tab:chapter1_microservices_principles}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.28\textwidth}|p{0.62\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Nguyên tắc} & \textbf{Ý nghĩa} \\
+        \hline
+        Single Responsibility & Mỗi service tập trung vào một năng lực nghiệp vụ chính. \\
+        \hline
+        Loose Coupling & Giảm phụ thuộc trực tiếp giữa các service. \\
+        \hline
+        High Cohesion & Các logic liên quan chặt chẽ nên nằm trong cùng một service. \\
+        \hline
+        Database per Service & Service sở hữu và bảo vệ dữ liệu nội bộ của mình. \\
+        \hline
+        Design for Failure & Thiết kế với giả định lỗi mạng và lỗi service có thể xảy ra. \\
+        \hline
+        Observability & Hệ thống cần có logging, metrics và tracing để theo dõi vận hành. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\section{Domain Driven Design (DDD)}
+
+\subsection{Mục tiêu}
+
+Domain Driven Design là phương pháp thiết kế phần mềm tập trung vào nghiệp vụ cốt lõi của hệ thống \cite{evans2003domain}. Thay vì bắt đầu từ bảng dữ liệu hoặc lớp kỹ thuật, DDD khuyến khích nhóm phát triển xây dựng mô hình phần mềm dựa trên cách chuyên gia nghiệp vụ hiểu và diễn đạt bài toán.
+
+Trong microservices, DDD đặc biệt quan trọng vì nó giúp xác định ranh giới service. Nếu chia service theo tầng kỹ thuật như controller, service, repository, hệ thống vẫn bị coupling theo chiều ngang và khó triển khai độc lập. Ngược lại, nếu chia theo bounded context, mỗi service có thể phản ánh một phần nghiệp vụ độc lập hơn.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{chapter1_ddd_flow}
+    \caption{Từ nghiệp vụ đến microservice theo Domain Driven Design}
+    \label{fig:chapter1_ddd_flow}
+\end{figure}
+
+\subsection{Các khái niệm cốt lõi}
+
+Entity là đối tượng có định danh riêng và được theo dõi qua vòng đời của nó \cite{evans2003domain,vernon2013implementing}. Ví dụ, User, Product và Order là các entity vì mỗi đối tượng có mã định danh riêng, dù các thuộc tính của chúng có thể thay đổi theo thời gian.
+
+Value Object là đối tượng không có định danh riêng và được so sánh dựa trên giá trị. Ví dụ, Address, Money hoặc Email có thể được xem là value object. Nếu hai đối tượng Money có cùng số tiền và cùng đơn vị tiền tệ, chúng có thể được coi là tương đương.
+
+Aggregate là cụm các entity và value object có quan hệ chặt chẽ, được quản lý thông qua một aggregate root. Ví dụ, Order có thể là aggregate root, trong khi OrderItem là entity nằm bên trong aggregate. Các thay đổi đối với OrderItem nên được thực hiện thông qua Order để bảo vệ tính nhất quán nghiệp vụ.
+
+Bounded Context là ranh giới trong đó một mô hình nghiệp vụ có ý nghĩa nhất quán. Cùng một thuật ngữ có thể mang nghĩa khác nhau ở các context khác nhau. Ví dụ, Customer trong Sales Context có thể tập trung vào hành vi mua hàng, trong khi Customer trong Support Context lại tập trung vào lịch sử hỗ trợ và khiếu nại.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{chapter1_aggregate_example}
+    \caption{Ví dụ Entity, Value Object và Aggregate trong DDD}
+    \label{fig:chapter1_aggregate_example}
+\end{figure}
+
+\subsection{Context Map}
+
+Context Map là sơ đồ biểu diễn quan hệ giữa các bounded context \cite{evans2003domain,vernon2013implementing}. Sơ đồ này giúp nhóm phát triển hiểu context nào phụ thuộc context nào, dữ liệu nào được chia sẻ và giao tiếp nào cần được kiểm soát bằng API hoặc event. Trong hệ thống lớn, Context Map giúp tránh việc các service phát triển độc lập nhưng lại hiểu sai ý nghĩa dữ liệu của nhau.
+
+Một số kiểu quan hệ thường gặp trong Context Map gồm Customer-Supplier, Shared Kernel, Conformist và Anti-Corruption Layer. Với hệ thống thương mại điện tử, Order Context có thể phụ thuộc vào Catalog Context để lấy thông tin sản phẩm, đồng thời phát sinh yêu cầu thanh toán sang Payment Context.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{chapter1_context_map_ecommerce}
+    \caption{Ví dụ Context Map cho hệ thống E-Commerce}
+    \label{fig:chapter1_context_map_ecommerce}
+\end{figure}
+
+\subsection{DDD trong Microservices}
+
+Trong microservices, bounded context thường là cơ sở để xác định ranh giới service \cite{newman2021building,vernon2013implementing}. Mỗi service nên đại diện cho một năng lực nghiệp vụ hoặc một context rõ ràng. Cách tiếp cận này giúp service có dữ liệu, logic và ngôn ngữ nghiệp vụ riêng, từ đó giảm phụ thuộc vào các service khác.
+
+DDD cũng giúp tránh sai lầm chia service quá nhỏ hoặc chia theo cấu trúc kỹ thuật. Một service quá nhỏ có thể làm tăng chi phí giao tiếp và vận hành. Ngược lại, một service quá lớn có thể trở thành monolithic thu nhỏ. Vì vậy, việc phân rã cần dựa trên hiểu biết về domain, mức độ thay đổi của nghiệp vụ và ranh giới dữ liệu.
+
+\section{Case Study: Healthcare (Luyện Decomposition)}
+
+\subsection{Mô tả bài toán}
+
+Xét một hệ thống quản lý bệnh viện với các chức năng chính gồm quản lý bệnh nhân, quản lý bác sĩ, đặt lịch khám, lưu hồ sơ khám bệnh, kê đơn thuốc và thanh toán. Nếu xây dựng theo monolithic, toàn bộ các chức năng này có thể nằm trong cùng một ứng dụng và dùng chung cơ sở dữ liệu. Tuy nhiên, khi bệnh viện mở rộng, mỗi nhóm nghiệp vụ có tốc độ thay đổi và yêu cầu vận hành khác nhau, do đó hệ thống cần được phân rã thành các service phù hợp.
+
+\subsection{Bước 1: Xác định Domain}
+
+Bước đầu tiên là xác định các domain chính của hệ thống. Mỗi domain đại diện cho một vùng nghiệp vụ có mục tiêu và dữ liệu riêng. Với bài toán Healthcare, các domain có thể gồm Patient Management, Doctor Management, Appointment Scheduling, Medical Record, Prescription và Billing.
+
+\begin{table}[H]
+    \centering
+    \caption{Các domain trong hệ thống Healthcare}
+    \label{tab:chapter1_healthcare_domains}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.3\textwidth}|p{0.6\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Domain} & \textbf{Mô tả} \\
+        \hline
+        Patient Management & Quản lý thông tin bệnh nhân, thông tin liên hệ và lịch sử định danh. \\
+        \hline
+        Doctor Management & Quản lý bác sĩ, chuyên khoa, lịch làm việc và trạng thái tiếp nhận khám. \\
+        \hline
+        Appointment Scheduling & Đặt lịch, đổi lịch, hủy lịch và theo dõi trạng thái lịch khám. \\
+        \hline
+        Medical Record & Lưu hồ sơ khám bệnh, chẩn đoán và kết quả điều trị. \\
+        \hline
+        Prescription & Quản lý đơn thuốc phát sinh sau quá trình khám bệnh. \\
+        \hline
+        Billing & Quản lý chi phí, hóa đơn và trạng thái thanh toán. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Bước 2: Xác định Bounded Context}
+
+Từ các domain đã xác định, hệ thống có thể được chia thành các bounded context tương ứng. Patient Context quản lý thông tin bệnh nhân. Doctor Context quản lý thông tin bác sĩ. Appointment Context chịu trách nhiệm đặt lịch và kiểm soát trạng thái lịch khám. Medical Record Context lưu thông tin y tế sau khi khám. Prescription Context quản lý đơn thuốc, còn Billing Context xử lý hóa đơn và thanh toán.
+
+Việc xác định bounded context giúp làm rõ dữ liệu nào thuộc quyền sở hữu của context nào. Appointment Context có thể cần mã bệnh nhân và mã bác sĩ, nhưng không nên trực tiếp sở hữu toàn bộ dữ liệu chi tiết của Patient Context hoặc Doctor Context.
+
+\subsection{Bước 3: Phân rã thành Microservices}
+
+Sau khi xác định bounded context, mỗi context có thể được ánh xạ thành một microservice. Khi đó, hệ thống Healthcare có thể gồm Patient Service, Doctor Service, Appointment Service, Medical Record Service, Prescription Service và Billing Service. Các service giao tiếp thông qua API hoặc event, trong khi dữ liệu nội bộ được quản lý riêng trong từng service.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.98\textwidth]{chapter1_healthcare_decomposition}
+    \caption{Phân rã hệ thống Healthcare thành các microservice}
+    \label{fig:chapter1_healthcare_decomposition}
+\end{figure}
+
+\subsection{Bước 4: Xác định quan hệ}
+
+Appointment Service cần tham chiếu đến Patient Service và Doctor Service để xác nhận bệnh nhân và bác sĩ tồn tại. Medical Record Service thường được tạo sau một lịch khám đã hoàn thành. Prescription Service phát sinh từ hồ sơ khám bệnh, trong khi Billing Service có thể tạo hóa đơn dựa trên lịch khám, dịch vụ y tế hoặc đơn thuốc.
+
+Các quan hệ này nên được thiết kế thông qua API hoặc event. Ví dụ, khi Appointment Service xác nhận lịch khám hoàn thành, nó có thể phát ra event để Medical Record Service tạo hồ sơ khám tương ứng. Cách tiếp cận này giúp giảm phụ thuộc trực tiếp và hỗ trợ mở rộng hệ thống tốt hơn.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{chapter1_service_relationships}
+    \caption{Quan hệ giữa các service trong hệ thống Healthcare}
+    \label{fig:chapter1_service_relationships}
+\end{figure}
+
+\subsection{Ví dụ API}
+
+Các API dưới đây minh họa cách các service trong hệ thống Healthcare có thể công bố chức năng ra bên ngoài. Đây chỉ là ví dụ ở mức khái quát để thể hiện ranh giới trách nhiệm của từng service, chưa đi vào thiết kế chi tiết request, response hoặc cơ chế xác thực.
+
+\begin{table}[H]
+    \centering
+    \caption{API minh họa cho hệ thống Healthcare Microservices}
+    \label{tab:chapter1_healthcare_api}
+    \small
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.3\textwidth}|p{0.33\textwidth}|p{0.27\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Service} & \textbf{API} & \textbf{Ý nghĩa} \\
+        \hline
+        Patient Service & \url{GET /patients} & Lấy danh sách bệnh nhân. \\
+        \hline
+        Patient Service & \url{POST /patients} & Tạo hồ sơ bệnh nhân mới. \\
+        \hline
+        Doctor Service & \url{GET /doctors} & Lấy danh sách bác sĩ. \\
+        \hline
+        Appointment Service & \url{POST /appointments} & Tạo lịch khám mới. \\
+        \hline
+        Medical Record Service & \url{POST /medical-records} & Tạo hồ sơ khám bệnh. \\
+        \hline
+        Prescription Service & \url{POST /prescriptions} & Tạo đơn thuốc. \\
+        \hline
+        Billing Service & \url{POST /billing/invoices} & Tạo hóa đơn thanh toán. \\
+        \hline
+    \end{tabular}
+    \arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\section{Kết luận}
+
+Chương này đã trình bày sự khác biệt giữa Monolithic Architecture và Microservices Architecture. Monolithic phù hợp với hệ thống nhỏ, MVP hoặc nhóm phát triển ít người vì đơn giản và dễ triển khai ban đầu. Tuy nhiên, khi hệ thống tăng quy mô, kiến trúc này gặp hạn chế về mở rộng, triển khai và phối hợp nhóm. Microservices giải quyết các hạn chế đó bằng cách chia hệ thống thành các service độc lập, nhưng đồng thời làm tăng độ phức tạp vận hành của hệ thống phân tán.
+
+Domain Driven Design cung cấp cơ sở phương pháp luận để phân rã hệ thống theo nghiệp vụ thay vì chia theo lớp kỹ thuật. Thông qua các khái niệm như Entity, Value Object, Aggregate, Bounded Context và Context Map, nhóm phát triển có thể xác định ranh giới service rõ ràng hơn. Case study Healthcare cho thấy quy trình phân rã từ domain đến bounded context và microservice. Tư duy này sẽ được áp dụng ở chương tiếp theo để thiết kế hệ thống E-Commerce theo kiến trúc microservices.
+
+\end{document}

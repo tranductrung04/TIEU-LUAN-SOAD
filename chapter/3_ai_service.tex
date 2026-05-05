@@ -1,0 +1,753 @@
+\documentclass[../main.tex]{subfiles}
+\begin{document}
+
+\section{Mục tiêu}
+
+Trong hệ thống E-Commerce theo kiến trúc Microservices, các chức năng như quản lý sản phẩm, quản lý người dùng, giỏ hàng, đơn hàng, thanh toán và vận chuyển được tách thành các service độc lập. Tuy nhiên, nếu hệ thống chỉ dừng lại ở các chức năng nghiệp vụ cơ bản thì trải nghiệm người dùng vẫn còn mang tính thủ công: người dùng phải tự tìm kiếm sản phẩm, tự so sánh thông tin và tự quyết định sản phẩm phù hợp. Vì vậy, AI Service được bổ sung nhằm hỗ trợ hệ thống tư vấn sản phẩm, cá nhân hóa danh sách gợi ý và hỗ trợ người dùng trong quá trình mua sắm.
+
+Mục tiêu chính của AI Service là phân tích dữ liệu người dùng, dữ liệu sản phẩm và ngữ cảnh truy vấn để đưa ra đề xuất phù hợp. Service này không thay thế các service nghiệp vụ như Product Service hay Order Service, mà đóng vai trò bổ trợ, khai thác dữ liệu từ các service khác để tạo ra giá trị gia tăng cho hệ thống.
+
+Các bài toán chính mà AI Service giải quyết bao gồm:
+
+\begin{itemize}
+    \item Gợi ý sản phẩm phù hợp với lịch sử hành vi của người dùng.
+    \item Tư vấn sản phẩm thông qua chatbot dựa trên dữ liệu sản phẩm hiện có.
+    \item Tìm kiếm sản phẩm theo ngữ nghĩa thay vì chỉ dựa trên từ khóa.
+    \item Hỗ trợ cá nhân hóa giao diện trang chủ, trang chi tiết sản phẩm và giỏ hàng.
+    \item Tăng khả năng chuyển đổi từ lượt xem sản phẩm sang hành động mua hàng.
+\end{itemize}
+
+Trong phạm vi bài tập lớn, AI Service tập trung vào hai chức năng chính: Recommendation List và Chatbot tư vấn sản phẩm. Recommendation List trả về danh sách sản phẩm gợi ý cho từng người dùng, còn Chatbot tư vấn cho phép người dùng đặt câu hỏi bằng ngôn ngữ tự nhiên và nhận câu trả lời kèm sản phẩm phù hợp.
+
+\section{Kiến trúc AI Service}
+
+AI Service được thiết kế như một microservice độc lập trong hệ thống. Service này giao tiếp với API Gateway và các service khác thông qua REST API hoặc thông qua cơ chế message/event nếu hệ thống cần xử lý dữ liệu bất đồng bộ. Việc tách AI Service thành một service riêng giúp hệ thống dễ mở rộng, dễ thay đổi mô hình AI và không làm ảnh hưởng trực tiếp đến các nghiệp vụ lõi như đặt hàng hay thanh toán.
+
+Kiến trúc tổng quát của AI Service gồm các thành phần sau:
+
+\begin{itemize}
+    \item \textbf{API Layer}: tiếp nhận yêu cầu gợi ý sản phẩm hoặc yêu cầu tư vấn từ API Gateway.
+    \item \textbf{Recommendation Engine}: xử lý bài toán gợi ý sản phẩm dựa trên hành vi người dùng, mô hình LSTM và Knowledge Graph.
+    \item \textbf{Chatbot/RAG Engine}: xử lý câu hỏi của người dùng, truy xuất thông tin liên quan và sinh câu trả lời tư vấn.
+    \item \textbf{Model Layer}: chứa các mô hình học máy như LSTM, mô hình embedding và mô hình ngôn ngữ lớn nếu có.
+    \item \textbf{Data Layer}: lưu trữ hoặc truy xuất dữ liệu hành vi người dùng, vector embedding, dữ liệu đồ thị và thông tin sản phẩm.
+\end{itemize}
+
+Luồng xử lý tổng quát có thể mô tả như Hình \ref{fig:chapter3-ai-service-architecture}.
+
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}[
+        component/.style={draw=primary, rounded corners, fill=primary!12, minimum width=2.7cm, minimum height=0.9cm, align=center, font=\small\bfseries},
+        storage/.style={draw=primary, rounded corners, fill=primary!8, minimum width=2.6cm, minimum height=0.85cm, align=center, font=\small},
+        link/.style={->, thick, color=primary, rounded corners=5pt}
+    ]
+        \node[component] (frontend) at (0, 4.2) {Frontend /\\Mobile App};
+        \node[component] (gateway) at (0, 2.7) {API Gateway};
+        \node[component] (ai) at (0, 1.1) {AI Service};
+        \node[storage] (lstm) at (-4.2, -0.8) {LSTM\\Model};
+        \node[storage] (neo4j) at (0, -0.8) {Neo4j\\Knowledge Graph};
+        \node[storage] (vector) at (4.2, -0.8) {Vector\\Database};
+        \node[component] (product) at (-4.2, -2.7) {Product\\Service};
+        \node[component] (user) at (0, -2.7) {User\\Service};
+        \node[component] (order) at (4.2, -2.7) {Order\\Service};
+        \draw[link] (frontend) -- (gateway);
+        \draw[link] (gateway) -- (ai);
+        \draw[link] (ai) -- (lstm);
+        \draw[link] (ai) -- (neo4j);
+        \draw[link] (ai) -- (vector);
+        \draw[link] (product) -- (lstm);
+        \draw[link] (user) -- (neo4j);
+        \draw[link] (order) -- (vector);
+    \end{tikzpicture}
+    \caption{Kiến trúc tổng quát của AI Service}
+    \label{fig:chapter3-ai-service-architecture}
+\end{figure}
+
+AI Service không trực tiếp sở hữu toàn bộ dữ liệu nghiệp vụ. Product Service vẫn là nơi quản lý thông tin sản phẩm chính thức, User Service quản lý thông tin người dùng, Order Service quản lý lịch sử đơn hàng. AI Service chỉ sử dụng các dữ liệu cần thiết để phân tích và đưa ra gợi ý.
+
+\section{Thu thập dữ liệu}
+
+Dữ liệu là thành phần quan trọng nhất đối với AI Service. Chất lượng gợi ý phụ thuộc nhiều vào khả năng thu thập, làm sạch và tổ chức dữ liệu. Trong hệ thống E-Commerce, dữ liệu đầu vào cho AI Service có thể đến từ nhiều nguồn khác nhau như Product Service, User Service, Cart Service, Order Service và hành vi tương tác trên giao diện người dùng.
+
+\subsection{User Behavior Data}
+
+User Behavior Data là dữ liệu mô tả hành vi của người dùng trong quá trình tương tác với hệ thống. Đây là nguồn dữ liệu chính để xây dựng mô hình gợi ý cá nhân hóa.
+
+Các loại hành vi thường được sử dụng bao gồm:
+
+\begin{table}[H]
+    \centering
+    \caption{Các loại dữ liệu hành vi người dùng}
+    \label{tab:chapter3-user-behavior-data}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.26\textwidth}|p{0.24\textwidth}|p{0.36\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Loại dữ liệu} & \textbf{Nguồn} & \textbf{Ý nghĩa} \\
+\hline
+Lượt xem sản phẩm & Frontend, Product Service & Cho biết người dùng quan tâm đến sản phẩm nào \\
+\hline
+Tìm kiếm sản phẩm & Search Service, API Gateway & Thể hiện nhu cầu hiện tại của người dùng \\
+\hline
+Thêm vào giỏ hàng & Cart Service & Cho thấy mức độ quan tâm cao hơn so với chỉ xem sản phẩm \\
+\hline
+Mua hàng & Order Service & Phản ánh sở thích và quyết định mua thực tế \\
+\hline
+Đánh giá sản phẩm & Review Service & Thể hiện mức độ hài lòng sau khi mua \\
+\hline
+\end{tabular}
+\arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+Mỗi loại hành vi có mức độ quan trọng khác nhau. Ví dụ, hành động mua hàng thường có giá trị cao hơn hành động xem sản phẩm vì nó thể hiện quyết định thực tế của người dùng. Do đó, hệ thống có thể gán trọng số cho từng loại hành vi để phục vụ quá trình tính điểm gợi ý.
+
+\begin{table}[H]
+    \centering
+    \caption{Ví dụ trọng số hành vi người dùng}
+    \label{tab:chapter3-behavior-weight}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.5\textwidth}|p{0.28\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Hành vi} & \textbf{Trọng số gợi ý} \\
+\hline
+Xem sản phẩm & 1 \\
+\hline
+Tìm kiếm sản phẩm & 2 \\
+\hline
+Thêm vào giỏ hàng & 3 \\
+\hline
+Đánh giá tốt & 4 \\
+\hline
+Mua hàng & 5 \\
+\hline
+\end{tabular}
+\arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Ví dụ dataset}
+
+Một dataset đơn giản cho hành vi người dùng có thể gồm các trường như \textit{user\_id}, \textit{product\_id}, \textit{action} và \textit{timestamp}. Dữ liệu này được sắp xếp theo thời gian để phục vụ mô hình sequence modeling.
+
+\begin{table}[H]
+    \centering
+    \caption{Ví dụ dữ liệu hành vi người dùng}
+    \label{tab:chapter3-user-behavior-example}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.17\textwidth}|p{0.18\textwidth}|p{0.25\textwidth}|p{0.28\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{user\_id} & \textbf{product\_id} & \textbf{action} & \textbf{timestamp} \\
+\hline
+U001 & P001 & view & 2026-04-01 10:00 \\
+\hline
+U001 & P002 & add\_to\_cart & 2026-04-01 10:05 \\
+\hline
+U001 & P002 & purchase & 2026-04-01 10:20 \\
+\hline
+U002 & P003 & search & 2026-04-01 11:00 \\
+\hline
+\end{tabular}
+\arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+Bên cạnh dữ liệu hành vi, AI Service còn cần dữ liệu sản phẩm. Dữ liệu sản phẩm được dùng để tạo embedding, xây dựng Knowledge Graph và cung cấp ngữ cảnh cho chatbot.
+
+\begin{table}[H]
+    \centering
+    \caption{Ví dụ dữ liệu sản phẩm}
+    \label{tab:chapter3-product-data-example}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.16\textwidth}|p{0.22\textwidth}|p{0.18\textwidth}|p{0.14\textwidth}|p{0.22\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{product\_id} & \textbf{name} & \textbf{category} & \textbf{price} & \textbf{description} \\
+\hline
+P001 & Áo thun nam & Fashion & 150000 & Áo cotton thoáng mát \\
+\hline
+P002 & Giày thể thao & Shoes & 500000 & Giày phù hợp chạy bộ \\
+\hline
+P003 & Laptop học tập & Electronics & 14500000 & Laptop RAM 16GB, SSD 512GB \\
+\hline
+\end{tabular}
+\arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\section{Mô hình LSTM (Sequence Modeling)}
+
+\subsection{Ý tưởng}
+
+Hành vi mua sắm của người dùng thường có tính tuần tự. Một sản phẩm mà người dùng xem hoặc mua trước đó có thể ảnh hưởng đến sản phẩm mà họ quan tâm tiếp theo. Ví dụ, nếu người dùng xem laptop, sau đó xem chuột máy tính và bàn phím, hệ thống có thể gợi ý thêm tai nghe, balo laptop hoặc màn hình rời.
+
+LSTM (Long Short-Term Memory) là một dạng mạng nơ-ron hồi tiếp được thiết kế để học dữ liệu dạng chuỗi. Trong bài toán gợi ý sản phẩm, LSTM có thể học chuỗi hành vi của người dùng theo thời gian và dự đoán sản phẩm tiếp theo mà người dùng có khả năng quan tâm.
+
+Ví dụ chuỗi hành vi:
+
+\begin{verbatim}
+Laptop -> Chuột máy tính -> Bàn phím
+\end{verbatim}
+
+Kết quả gợi ý có thể là:
+
+\begin{verbatim}
+Tai nghe, Màn hình, Balo laptop
+\end{verbatim}
+
+\subsection{Model chi tiết}
+
+Mô hình LSTM cho recommendation có thể được thiết kế với đầu vào là chuỗi mã sản phẩm hoặc mã danh mục mà người dùng đã tương tác. Các mã này được chuyển thành vector thông qua Embedding Layer, sau đó đưa vào LSTM Layer để học quan hệ tuần tự. Cuối cùng, Dense Layer hoặc Softmax Layer được dùng để dự đoán sản phẩm tiếp theo.
+
+Cấu trúc mô hình tổng quát được mô tả trong Hình \ref{fig:chapter3-lstm-model}.
+
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}[
+        layer/.style={draw=primary, rounded corners, fill=primary!10, minimum width=4.2cm, minimum height=0.85cm, align=center, font=\small\bfseries},
+        link/.style={->, thick, color=primary}
+    ]
+        \node[layer] (input) at (0, 4) {Product Sequence};
+        \node[layer] (embed) at (0, 2.8) {Embedding Layer};
+        \node[layer] (lstm) at (0, 1.6) {LSTM Layer};
+        \node[layer] (dense) at (0, 0.4) {Dense Layer};
+        \node[layer] (output) at (0, -0.8) {Recommended Product};
+        \draw[link] (input) -- (embed);
+        \draw[link] (embed) -- (lstm);
+        \draw[link] (lstm) -- (dense);
+        \draw[link] (dense) -- (output);
+    \end{tikzpicture}
+    \caption{Cấu trúc mô hình LSTM cho gợi ý sản phẩm}
+    \label{fig:chapter3-lstm-model}
+\end{figure}
+
+Về mặt dữ liệu, bài toán có thể mô tả như sau:
+
+\begin{verbatim}
+Input : [P1, P2, P3, ..., Pn]
+Output: Pn+1
+\end{verbatim}
+
+Trong đó, \textit{P1, P2, P3} là các sản phẩm người dùng đã tương tác theo thứ tự thời gian, còn \textit{Pn+1} là sản phẩm mô hình dự đoán người dùng có thể quan tâm tiếp theo.
+
+\subsection{Training}
+
+Quy trình huấn luyện mô hình LSTM gồm các bước chính:
+
+\begin{enumerate}
+    \item Thu thập lịch sử hành vi người dùng từ hệ thống.
+    \item Sắp xếp các hành vi theo thời gian.
+    \item Chuyển đổi \textit{product\_id} hoặc \textit{category\_id} thành chỉ số số học.
+    \item Tạo các chuỗi huấn luyện từ lịch sử hành vi.
+    \item Huấn luyện mô hình LSTM để dự đoán sản phẩm tiếp theo.
+    \item Lưu mô hình đã huấn luyện để AI Service sử dụng khi inference.
+\end{enumerate}
+
+Ví dụ dữ liệu huấn luyện:
+
+\begin{verbatim}
+Input sequence : [ao_thun, quan_jean, giay_sneaker]
+Expected output: mu_luoi_trai
+\end{verbatim}
+
+Trong triển khai thực tế, mô hình có thể được xây dựng bằng TensorFlow/Keras hoặc PyTorch. Sau khi huấn luyện, model được đóng gói và cung cấp thông qua REST API để Recommendation Engine gọi khi cần sinh danh sách sản phẩm gợi ý.
+
+\section{Knowledge Graph với Neo4j}
+
+\subsection{Mô hình đồ thị}
+
+Bên cạnh mô hình LSTM, hệ thống có thể sử dụng Knowledge Graph để biểu diễn quan hệ giữa người dùng, sản phẩm, danh mục và thương hiệu. Khác với cơ sở dữ liệu quan hệ truyền thống, Knowledge Graph biểu diễn dữ liệu dưới dạng node và relationship, phù hợp với các bài toán cần khai thác quan hệ phức tạp.
+
+Trong hệ thống E-Commerce, các node chính có thể bao gồm:
+
+\begin{itemize}
+    \item \textbf{User}: người dùng trong hệ thống.
+    \item \textbf{Product}: sản phẩm được bán trên hệ thống.
+    \item \textbf{Category}: danh mục sản phẩm.
+    \item \textbf{Brand}: thương hiệu sản phẩm.
+    \item \textbf{Order}: đơn hàng.
+    \item \textbf{Tag}: nhãn mô tả đặc điểm sản phẩm.
+\end{itemize}
+
+Các quan hệ chính có thể bao gồm:
+
+\begin{itemize}
+    \item \textbf{VIEWED}: người dùng đã xem sản phẩm.
+    \item \textbf{BOUGHT}: người dùng đã mua sản phẩm.
+    \item \textbf{ADDED\_TO\_CART}: người dùng đã thêm sản phẩm vào giỏ hàng.
+    \item \textbf{BELONGS\_TO}: sản phẩm thuộc một danh mục.
+    \item \textbf{MADE\_BY}: sản phẩm thuộc một thương hiệu.
+    \item \textbf{SIMILAR\_TO}: hai sản phẩm có đặc điểm tương tự.
+\end{itemize}
+
+Mô hình quan hệ có thể biểu diễn như Hình \ref{fig:chapter3-knowledge-graph}.
+
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}[
+        nodegraph/.style={draw=primary, rounded corners, fill=primary!10, minimum width=2.2cm, minimum height=0.85cm, align=center, font=\small\bfseries},
+        relation/.style={->, thick, color=primary, shorten >=2pt, shorten <=2pt}
+    ]
+        \node[nodegraph] (user) at (0, 2.4) {User};
+        \node[nodegraph] (product) at (4.2, 2.4) {Product};
+        \node[nodegraph] (category) at (8.4, 4.0) {Category};
+        \node[nodegraph] (brand) at (8.4, 2.4) {Brand};
+        \node[nodegraph] (similar) at (8.4, 0.8) {Product};
+        \draw[relation] ([yshift=8pt]user.east) -- node[above, font=\scriptsize, yshift=4pt] {VIEWED} ([yshift=8pt]product.west);
+        \draw[relation] ([yshift=-8pt]user.east) -- node[below, font=\scriptsize, yshift=-4pt] {BOUGHT} ([yshift=-8pt]product.west);
+        \draw[relation] (product.north east) -- node[above, font=\scriptsize, xshift=-2pt] {BELONGS\_TO} (category.south west);
+        \draw[relation] (product.east) -- node[below, font=\scriptsize, xshift=-2pt, yshift=3pt] {MADE\_BY} (brand.west);
+        \draw[relation] (product.south east) -- node[below, font=\scriptsize, xshift=-2pt] {SIMILAR\_TO} (similar.north west);
+    \end{tikzpicture}
+    \caption{Mô hình Knowledge Graph cho AI Service}
+    \label{fig:chapter3-knowledge-graph}
+\end{figure}
+
+\subsection{Ví dụ Cypher}
+
+Neo4j sử dụng ngôn ngữ Cypher để truy vấn dữ liệu đồ thị. Ví dụ, để tìm các sản phẩm cùng danh mục với sản phẩm mà người dùng đã mua, có thể sử dụng truy vấn sau:
+
+\begin{verbatim}
+MATCH (u:User {id: "U001"})-[:BOUGHT]->(p:Product)
+      -[:BELONGS_TO]->(c:Category)<-[:BELONGS_TO]-(recommend:Product)
+WHERE NOT (u)-[:BOUGHT]->(recommend)
+RETURN recommend
+LIMIT 5;
+\end{verbatim}
+
+Truy vấn này thực hiện các bước: tìm người dùng U001, tìm sản phẩm người dùng đã mua, tìm danh mục của sản phẩm đó, sau đó tìm các sản phẩm khác cùng danh mục mà người dùng chưa mua. Kết quả trả về có thể được dùng như một phần trong danh sách gợi ý.
+
+\subsection{Truy vấn gợi ý}
+
+Knowledge Graph có thể hỗ trợ nhiều kiểu gợi ý khác nhau:
+
+\begin{itemize}
+    \item Gợi ý sản phẩm cùng danh mục với sản phẩm đã mua.
+    \item Gợi ý sản phẩm cùng thương hiệu với sản phẩm người dùng thường xem.
+    \item Gợi ý sản phẩm tương tự dựa trên quan hệ \textit{SIMILAR\_TO}.
+    \item Gợi ý sản phẩm dựa trên hành vi của nhóm người dùng có sở thích gần giống nhau.
+\end{itemize}
+
+So với cơ sở dữ liệu quan hệ, Neo4j phù hợp hơn khi cần truy vấn các quan hệ nhiều tầng giữa user, product, category và brand.
+
+\begin{table}[H]
+    \centering
+    \caption{So sánh Neo4j và cơ sở dữ liệu quan hệ}
+    \label{tab:chapter3-neo4j-comparison}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.26\textwidth}|p{0.3\textwidth}|p{0.3\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Tiêu chí} & \textbf{Neo4j} & \textbf{MySQL/PostgreSQL} \\
+\hline
+Biểu diễn quan hệ phức tạp & Tự nhiên thông qua node và relationship & Cần nhiều bảng trung gian \\
+\hline
+Truy vấn gợi ý theo quan hệ & Phù hợp & Dễ phức tạp do nhiều JOIN \\
+\hline
+Dữ liệu giao dịch & Không phải lựa chọn chính & Phù hợp hơn \\
+\hline
+Khả năng giải thích gợi ý & Tốt vì có thể lần theo quan hệ & Khó trực quan hơn \\
+\hline
+\end{tabular}
+\arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\section{RAG (Retrieval-Augmented Generation)}
+
+RAG là phương pháp kết hợp giữa truy xuất thông tin và mô hình sinh ngôn ngữ. Trong hệ thống E-Commerce, RAG được sử dụng để xây dựng chatbot tư vấn sản phẩm. Thay vì để mô hình ngôn ngữ trả lời hoàn toàn dựa trên kiến thức có sẵn, hệ thống sẽ truy xuất thông tin sản phẩm liên quan từ cơ sở dữ liệu trước, sau đó dùng các thông tin này làm ngữ cảnh để sinh câu trả lời.
+
+\subsection{Pipeline}
+
+Pipeline RAG cho chatbot tư vấn sản phẩm gồm các bước:
+
+\begin{enumerate}
+    \item Người dùng nhập câu hỏi bằng ngôn ngữ tự nhiên.
+    \item Hệ thống chuyển câu hỏi thành vector embedding.
+    \item Vector Database tìm các sản phẩm hoặc tài liệu có nội dung gần nhất.
+    \item AI Service lấy thông tin sản phẩm liên quan làm ngữ cảnh.
+    \item Mô hình ngôn ngữ sinh câu trả lời dựa trên ngữ cảnh đã truy xuất.
+    \item Hệ thống trả về câu trả lời và danh sách sản phẩm phù hợp.
+\end{enumerate}
+
+Luồng xử lý có thể mô tả như Hình \ref{fig:chapter3-rag-pipeline}.
+
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}[
+        flowstep/.style={draw=primary, rounded corners, fill=primary!10, minimum width=4.4cm, minimum height=0.75cm, align=center, font=\small\bfseries},
+        link/.style={->, thick, color=primary}
+    ]
+        \node[flowstep] (question) at (0, 5) {User Question};
+        \node[flowstep] (embedding) at (0, 3.9) {Text Embedding};
+        \node[flowstep] (search) at (0, 2.8) {Vector Database Search};
+        \node[flowstep] (retrieve) at (0, 1.7) {Retrieve Product Documents};
+        \node[flowstep] (llm) at (0, 0.6) {LLM Generate Answer};
+        \node[flowstep] (response) at (0, -0.5) {Response to User};
+        \draw[link] (question) -- (embedding);
+        \draw[link] (embedding) -- (search);
+        \draw[link] (search) -- (retrieve);
+        \draw[link] (retrieve) -- (llm);
+        \draw[link] (llm) -- (response);
+    \end{tikzpicture}
+    \caption{Pipeline RAG cho chatbot tư vấn sản phẩm}
+    \label{fig:chapter3-rag-pipeline}
+\end{figure}
+
+Ví dụ, người dùng hỏi:
+
+\begin{verbatim}
+Tôi cần một đôi giày chạy bộ dưới 1 triệu, có loại nào phù hợp không?
+\end{verbatim}
+
+AI Service sẽ tìm các sản phẩm thuộc nhóm giày chạy bộ, có giá dưới 1 triệu và mô tả phù hợp với nhu cầu chạy bộ. Sau đó chatbot sinh câu trả lời kèm lý do đề xuất.
+
+\subsection{Vector Database}
+
+Vector Database được sử dụng để lưu trữ embedding của sản phẩm. Mỗi sản phẩm có thể được chuyển thành vector dựa trên tên, mô tả, danh mục, thương hiệu, thuộc tính kỹ thuật và đánh giá của người dùng.
+
+Một số lựa chọn công nghệ cho Vector Database bao gồm FAISS, ChromaDB, Pinecone, Weaviate và Qdrant. Trong phạm vi bài tập lớn, ChromaDB hoặc FAISS là lựa chọn phù hợp vì dễ cài đặt, dễ thử nghiệm và không yêu cầu hạ tầng phức tạp.
+
+\begin{table}[H]
+    \centering
+    \caption{So sánh một số Vector Database}
+    \label{tab:chapter3-vector-database-comparison}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.22\textwidth}|p{0.34\textwidth}|p{0.34\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Công nghệ} & \textbf{Ưu điểm} & \textbf{Hạn chế} \\
+\hline
+FAISS & Nhanh, phù hợp tìm kiếm vector cục bộ & Cần tự xây dựng thêm API và quản lý metadata \\
+\hline
+ChromaDB & Dễ sử dụng, phù hợp prototype & Chưa tối ưu cho hệ thống rất lớn \\
+\hline
+Pinecone & Dịch vụ quản lý sẵn, dễ mở rộng & Phụ thuộc nền tảng bên ngoài \\
+\hline
+Qdrant & Hỗ trợ filtering tốt, hiệu năng cao & Cần triển khai thêm hạ tầng \\
+\hline
+\end{tabular}
+\arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\subsection{Ví dụ}
+
+Ví dụ dữ liệu sản phẩm được đưa vào hệ thống RAG:
+
+\begin{verbatim}
+Tên sản phẩm: Giày chạy bộ X
+Danh mục    : Giày thể thao
+Giá         : 850000
+Mô tả       : Phù hợp chạy bộ, đế êm, trọng lượng nhẹ
+\end{verbatim}
+
+Khi người dùng hỏi về sản phẩm chạy bộ dưới 1 triệu, chatbot có thể trả lời:
+
+\begin{verbatim}
+Bạn có thể tham khảo Giày chạy bộ X vì sản phẩm này có giá 850.000đ,
+phù hợp ngân sách dưới 1 triệu, thiết kế nhẹ và đế êm cho nhu cầu
+chạy bộ hằng ngày.
+\end{verbatim}
+
+Cách tiếp cận này giúp chatbot hạn chế trả lời sai thông tin sản phẩm, vì câu trả lời được sinh dựa trên dữ liệu đã được truy xuất từ hệ thống.
+
+\section{Kết hợp Hybrid Model}
+
+Một mô hình gợi ý chỉ dựa trên một kỹ thuật thường có nhiều hạn chế. Nếu chỉ sử dụng LSTM, hệ thống có thể học được chuỗi hành vi nhưng khó giải thích vì sao một sản phẩm được đề xuất. Nếu chỉ sử dụng Knowledge Graph, hệ thống khai thác tốt quan hệ giữa các thực thể nhưng khó học được xu hướng hành vi theo thời gian. Nếu chỉ dùng RAG, hệ thống phù hợp với chatbot nhưng chưa đủ để cá nhân hóa danh sách gợi ý trên giao diện.
+
+Vì vậy, AI Service sử dụng hướng tiếp cận Hybrid Model bằng cách kết hợp nhiều kỹ thuật:
+
+\begin{table}[H]
+    \centering
+    \caption{Các thành phần trong Hybrid Model}
+    \label{tab:chapter3-hybrid-components}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.26\textwidth}|p{0.62\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Thành phần} & \textbf{Vai trò} \\
+\hline
+LSTM & Dự đoán sản phẩm tiếp theo dựa trên chuỗi hành vi người dùng \\
+\hline
+Knowledge Graph & Khai thác quan hệ giữa user, product, category và brand \\
+\hline
+RAG & Hỗ trợ chatbot tư vấn dựa trên dữ liệu sản phẩm \\
+\hline
+Vector Search & Tìm kiếm sản phẩm theo ngữ nghĩa \\
+\hline
+Rule-based Filter & Lọc theo giá, tồn kho, danh mục hoặc điều kiện nghiệp vụ \\
+\hline
+\end{tabular}
+\arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+Luồng gợi ý sản phẩm theo Hybrid Model có thể mô tả như Hình \ref{fig:chapter3-hybrid-flow}.
+
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}[
+        flowstep/.style={draw=primary, rounded corners, fill=primary!10, minimum width=4.6cm, minimum height=0.75cm, align=center, font=\small\bfseries},
+        link/.style={->, thick, color=primary}
+    ]
+        \node[flowstep] (behavior) at (0, 5) {User Behavior};
+        \node[flowstep] (lstm) at (0, 3.9) {LSTM Recommendation};
+        \node[flowstep] (kg) at (0, 2.8) {Knowledge Graph Expansion};
+        \node[flowstep] (filter) at (0, 1.7) {Business Rule Filter};
+        \node[flowstep] (ranking) at (0, 0.6) {Ranking};
+        \node[flowstep] (final) at (0, -0.5) {Final Recommendation List};
+        \draw[link] (behavior) -- (lstm);
+        \draw[link] (lstm) -- (kg);
+        \draw[link] (kg) -- (filter);
+        \draw[link] (filter) -- (ranking);
+        \draw[link] (ranking) -- (final);
+    \end{tikzpicture}
+    \caption{Luồng xử lý Hybrid Model cho gợi ý sản phẩm}
+    \label{fig:chapter3-hybrid-flow}
+\end{figure}
+
+Trong đó, LSTM tạo danh sách ứng viên dựa trên hành vi gần đây, Knowledge Graph mở rộng danh sách sản phẩm liên quan, Rule-based Filter loại bỏ sản phẩm không phù hợp như hết hàng hoặc vượt ngân sách, sau đó Ranking sắp xếp lại danh sách theo điểm phù hợp.
+
+\section{Hai dạng AI Service}
+
+\subsection{Recommendation List}
+
+Recommendation List là chức năng trả về danh sách sản phẩm được cá nhân hóa cho từng người dùng. Chức năng này có thể được sử dụng ở nhiều vị trí trong hệ thống như trang chủ, trang chi tiết sản phẩm, trang giỏ hàng hoặc email marketing.
+
+Ví dụ API:
+
+\begin{verbatim}
+GET /api/ai/recommendations?user_id=U001
+\end{verbatim}
+
+Ví dụ response:
+
+\begin{verbatim}
+{
+  "user_id": "U001",
+  "recommendations": [
+    {
+      "product_id": "P101",
+      "name": "Giày chạy bộ X",
+      "score": 0.92,
+      "reason": "Tương tự sản phẩm bạn đã xem"
+    }
+  ]
+}
+\end{verbatim}
+
+Trường \textit{score} thể hiện mức độ phù hợp của sản phẩm đối với người dùng. Trường \textit{reason} giúp hệ thống giải thích ngắn gọn vì sao sản phẩm được đề xuất.
+
+\subsection{Chatbot tư vấn}
+
+Chatbot tư vấn cho phép người dùng đặt câu hỏi bằng ngôn ngữ tự nhiên. AI Service sẽ truy xuất dữ liệu sản phẩm liên quan và trả lời dựa trên dữ liệu đó.
+
+Ví dụ API:
+
+\begin{verbatim}
+POST /api/ai/chat
+\end{verbatim}
+
+Ví dụ request:
+
+\begin{verbatim}
+{
+  "user_id": "U001",
+  "message": "Tôi muốn mua laptop học lập trình dưới 15 triệu"
+}
+\end{verbatim}
+
+Ví dụ response:
+
+\begin{verbatim}
+{
+  "answer": "Bạn có thể tham khảo Laptop A vì có RAM 16GB, SSD 512GB
+             và giá dưới 15 triệu, phù hợp cho nhu cầu học lập trình.",
+  "products": [
+    {
+      "product_id": "P201",
+      "name": "Laptop A",
+      "price": 14500000
+    }
+  ]
+}
+\end{verbatim}
+
+Để hạn chế việc chatbot sinh thông tin không chính xác, hệ thống chỉ nên cho phép chatbot trả lời dựa trên dữ liệu được truy xuất từ Product Service hoặc Vector Database.
+
+\section{Triển khai AI Service}
+
+\subsection{Tech stack}
+
+AI Service có thể được triển khai bằng Python vì hệ sinh thái Python hỗ trợ tốt cho học máy, xử lý dữ liệu và xây dựng API. FastAPI là lựa chọn phù hợp cho model serving vì nhẹ, tốc độ cao và hỗ trợ xây dựng REST API đơn giản. Nếu toàn bộ hệ thống đang sử dụng Django, AI Service cũng có thể được triển khai bằng Django REST Framework để đồng nhất công nghệ.
+
+\begin{table}[H]
+    \centering
+    \caption{Tech stack cho AI Service}
+    \label{tab:chapter3-tech-stack}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.32\textwidth}|p{0.54\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Thành phần} & \textbf{Công nghệ} \\
+\hline
+API Service & FastAPI \\
+\hline
+Machine Learning Model & TensorFlow/Keras \\
+\hline
+Vector Database & ChromaDB \\
+\hline
+Knowledge Graph & Neo4j \\
+\hline
+Database & PostgreSQL \\
+\hline
+Message/Event & Kafka \\
+\hline
+Container & Docker \\
+\hline
+Monitoring & Prometheus, Grafana \\
+\hline
+\end{tabular}
+\arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+Trong phạm vi bài tập lớn, lựa chọn cụ thể gồm FastAPI, TensorFlow/Keras, ChromaDB, Neo4j và Docker. Các công nghệ này đủ để minh họa kiến trúc AI Service, vừa không làm hệ thống trở nên quá phức tạp.
+
+\subsection{Kiến trúc}
+
+Khi triển khai trong hệ thống Microservices, AI Service được đặt sau API Gateway giống như các service khác. Frontend không gọi trực tiếp vào các service nội bộ mà gửi request đến API Gateway, sau đó API Gateway chuyển tiếp request đến AI Service.
+
+Mô hình triển khai được mô tả trong Hình \ref{fig:chapter3-ai-deployment}.
+
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}[
+        service/.style={draw=primary, rounded corners, fill=primary!15, minimum width=2.8cm, minimum height=0.85cm, align=center, font=\small\bfseries},
+        storage/.style={draw=primary, rounded corners, fill=primary!8, minimum width=2.6cm, minimum height=0.8cm, align=center, font=\small},
+        link/.style={->, thick, color=primary, rounded corners=5pt}
+    ]
+        \node[service] (frontend) at (0, 5.0) {Frontend};
+        \node[service] (gateway) at (0, 3.55) {API Gateway};
+        \node[service] (ai) at (0, 2.05) {AI Service};
+        \node[storage] (model) at (-5.0, 0.2) {Model\\Storage};
+        \node[storage] (vector) at (0, 0.2) {Vector\\Database};
+        \node[storage] (neo4j) at (5.0, 0.2) {Neo4j};
+        \node[service] (product) at (-5.0, -1.9) {Product\\Service};
+        \node[service] (user) at (0, -1.9) {User\\Service};
+        \node[service] (order) at (5.0, -1.9) {Order\\Service};
+        \draw[link] (frontend) -- (gateway);
+        \draw[link] (gateway) -- (ai);
+        \draw[link] (ai.west) -| (model.north);
+        \draw[link] (ai.south) -- (vector.north);
+        \draw[link] (ai.east) -| (neo4j.north);
+        \draw[link] (model.south) -- (product.north);
+        \draw[link] (vector.south) -- (user.north);
+        \draw[link] (neo4j.south) -- (order.north);
+    \end{tikzpicture}
+    \caption{Mô hình triển khai AI Service trong hệ thống Microservices}
+    \label{fig:chapter3-ai-deployment}
+\end{figure}
+
+AI Service lấy dữ liệu sản phẩm mới nhất từ Product Service, lấy lịch sử mua hàng từ Order Service và lấy thông tin người dùng từ User Service. Đối với dữ liệu hành vi như view, search hoặc add to cart, hệ thống có thể gửi event sang AI Service để cập nhật dữ liệu gần thời gian thực.
+
+Quy trình inference cho Recommendation List:
+
+\begin{enumerate}
+    \item Người dùng truy cập trang chủ hoặc trang chi tiết sản phẩm.
+    \item Frontend gửi request lấy danh sách gợi ý.
+    \item API Gateway chuyển request đến AI Service.
+    \item AI Service lấy lịch sử hành vi của người dùng.
+    \item Recommendation Engine sinh danh sách sản phẩm ứng viên.
+    \item Rule-based Filter loại bỏ sản phẩm không phù hợp.
+    \item AI Service trả danh sách sản phẩm gợi ý về Frontend.
+\end{enumerate}
+
+Quy trình inference cho Chatbot:
+
+\begin{enumerate}
+    \item Người dùng nhập câu hỏi tư vấn.
+    \item AI Service chuyển câu hỏi thành embedding.
+    \item Vector Database truy xuất các sản phẩm liên quan.
+    \item RAG Engine tạo prompt với dữ liệu sản phẩm đã truy xuất.
+    \item Mô hình ngôn ngữ sinh câu trả lời.
+    \item AI Service trả câu trả lời và danh sách sản phẩm về Frontend.
+\end{enumerate}
+
+\section{Bài tập}
+
+Để kiểm chứng thiết kế AI Service, sinh viên có thể thực hiện các bài tập nhỏ sau:
+
+\begin{enumerate}
+    \item Thiết kế API cho chức năng Recommendation List và Chatbot tư vấn.
+    \item Tạo dataset mẫu gồm người dùng, sản phẩm và lịch sử hành vi.
+    \item Xây dựng mô hình gợi ý đơn giản dựa trên lịch sử hành vi.
+    \item Tạo dữ liệu graph trong Neo4j cho user, product, category và brand.
+    \item Viết truy vấn Cypher để gợi ý sản phẩm cùng danh mục hoặc cùng thương hiệu.
+    \item Tạo pipeline RAG đơn giản cho chatbot tư vấn sản phẩm.
+    \item Docker hóa AI Service và chạy cùng các service khác bằng docker-compose.
+\end{enumerate}
+
+\section{Checklist đánh giá}
+
+Checklist sau được dùng để đánh giá mức độ hoàn thiện của AI Service trong hệ thống:
+
+\begin{table}[H]
+    \centering
+    \caption{Checklist đánh giá AI Service}
+    \label{tab:chapter3-ai-checklist}
+    \arrayrulecolor{primary}
+    \rowcolors{2}{primary!10}{white}
+    \begin{tabular}{|p{0.68\textwidth}|p{0.2\textwidth}|}
+        \hline
+        \rowcolor{primary!35}
+        \textbf{Tiêu chí} & \textbf{Đạt/Chưa đạt} \\
+\hline
+Có mô tả mục tiêu của AI Service & Đạt \\
+\hline
+Có liên kết AI Service với yêu cầu ở Chương 2 & Đạt \\
+\hline
+Có mô tả dữ liệu đầu vào cho AI Service & Đạt \\
+\hline
+Có thiết kế Recommendation List & Đạt \\
+\hline
+Có thiết kế Chatbot tư vấn sản phẩm & Đạt \\
+\hline
+Có giải thích mô hình LSTM & Đạt \\
+\hline
+Có mô tả Knowledge Graph với Neo4j & Đạt \\
+\hline
+Có mô tả RAG pipeline & Đạt \\
+\hline
+Có API mẫu cho AI Service & Đạt \\
+\hline
+Có tech stack triển khai rõ ràng & Đạt \\
+\hline
+Có so sánh công nghệ thay thế & Đạt \\
+\hline
+Có đánh giá ưu điểm và hạn chế của hướng tiếp cận & Đạt \\
+\hline
+\end{tabular}
+\arrayrulecolor{black}
+    \rowcolors{2}{}{}
+\end{table}
+
+\section{Kết luận}
+
+Chương này đã trình bày thiết kế AI Service cho hệ thống E-Commerce theo kiến trúc Microservices. AI Service được xây dựng nhằm hỗ trợ hai chức năng chính là gợi ý sản phẩm và chatbot tư vấn. Để đạt được mục tiêu này, hệ thống kết hợp nhiều kỹ thuật như LSTM cho sequence modeling, Knowledge Graph với Neo4j để khai thác quan hệ giữa các thực thể và RAG để hỗ trợ trả lời câu hỏi dựa trên dữ liệu sản phẩm.
+
+Hướng tiếp cận Hybrid Model giúp hệ thống tận dụng ưu điểm của nhiều phương pháp khác nhau. LSTM giúp học hành vi người dùng theo thời gian, Knowledge Graph giúp tăng khả năng giải thích và RAG giúp chatbot tư vấn bằng ngôn ngữ tự nhiên. Nhờ đó, AI Service không chỉ làm tăng tính cá nhân hóa mà còn cải thiện trải nghiệm mua sắm trong hệ thống E-Commerce.
+
+\end{document}
